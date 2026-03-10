@@ -25,6 +25,8 @@ from ai.service import HireLoopAI
 from bot.onboarding import build_onboarding_handler
 from bot.handlers.settings import get_settings_handlers
 from bot.keyboards import MAIN_KEYBOARD
+from db.models import Base
+from db.session import engine
 
 logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -74,7 +76,15 @@ def _build_allowlist(raw: str) -> tuple[set[int], set[str]] | None:
     return (ids, usernames)
 
 
+async def _init_db():
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+
 def main():
+    import asyncio
+    asyncio.get_event_loop().run_until_complete(_init_db())
+
     token = os.getenv("TELEGRAM_BOT_TOKEN", "")
     if not token:
         logger.error("TELEGRAM_BOT_TOKEN not set in .env")
