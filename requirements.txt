@@ -1,0 +1,34 @@
+# AI providers
+anthropic
+openai
+google-generativeai
+groq
+httpx
+
+# Telegram bot
+python-telegram-bot[job-queue]
+
+# Job scraping
+jobspy2
+# httpx already listed above (used by Jina Reader too)
+
+# Database
+sqlalchemy[asyncio]
+aiosqlite
+alembic
+
+# Config
+python-dotenv
+
+# PDF export (pure Python — no system dependencies)
+reportlab
+
+# Background scheduling (embedded in bot process)
+apscheduler
+
+# Resume parsing (input)
+pypdf2
+python-docx
+
+# Markdown processing
+markdown
