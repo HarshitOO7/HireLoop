@@ -9,12 +9,16 @@ Run with:
 import logging
 import os
 import sys
+import warnings
 
 # Allow imports from project root
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from dotenv import load_dotenv
 load_dotenv()
+
+# Suppress PTB per_message warning
+warnings.filterwarnings("ignore", message=".*per_message.*", category=UserWarning)
 
 from telegram import Update
 from telegram.ext import Application, MessageHandler, TypeHandler, filters
@@ -30,9 +34,18 @@ from db.session import engine
 
 logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    level=logging.INFO,
+    level=logging.DEBUG,
 )
+# Silence noisy third-party loggers — we only want HireLoop internals at DEBUG
 logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("groq").setLevel(logging.WARNING)
+logging.getLogger("anthropic").setLevel(logging.WARNING)
+logging.getLogger("openai").setLevel(logging.WARNING)
+logging.getLogger("telegram").setLevel(logging.INFO)
+logging.getLogger("aiosqlite").setLevel(logging.WARNING)
+logging.getLogger("sqlalchemy").setLevel(logging.WARNING)
+logging.getLogger("apscheduler").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 

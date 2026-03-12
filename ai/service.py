@@ -1,7 +1,11 @@
 import json
+import logging
 import re
+import time
 from ai.base import AIProvider
 from ai import cache
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_json(raw: str) -> dict | list:
@@ -163,33 +167,72 @@ class HireLoopAI:
         self._quality = quality_provider
 
     async def parse_job(self, raw_jd_text: str) -> dict:
+        logger.info("[parse_job] START — jd text %d chars", len(raw_jd_text))
+        t0 = time.monotonic()
         if cached := cache.get("parse_job", raw_jd_text):
+            logger.info("[parse_job] CACHE HIT (%.2fs)", time.monotonic() - t0)
             return cached
         prompt = _PARSE_JOB_PROMPT.format(jd_text=raw_jd_text)
+        logger.info("[parse_job] sending to %s — prompt %d chars", self._fast.provider_name, len(prompt))
+        t_ai = time.monotonic()
         raw = await self._fast.complete(prompt, system=_PARSE_JOB_SYSTEM)
+        logger.info("[parse_job] AI responded in %.2fs — raw %d chars", time.monotonic() - t_ai, len(raw))
         result = _parse_json(raw)
+        logger.info("[parse_job] DONE %.2fs — title=%r company=%r fit=%s skills_req=%d",
+                    time.monotonic() - t0,
+                    result.get("title"), result.get("company"),
+                    result.get("fit_score"), len(result.get("required_skills", [])))
         cache.put("parse_job", result, raw_jd_text)
         return result
 
     async def parse_resume(self, resume_text: str) -> dict:
+        logger.info("[parse_resume] START — resume text length: %d chars", len(resume_text))
+        t0 = time.monotonic()
+
         if cached := cache.get("parse_resume", resume_text):
+            logger.info("[parse_resume] CACHE HIT — returning cached result (%.2fs)", time.monotonic() - t0)
             return cached
+
+        logger.info("[parse_resume] cache miss — building prompt (provider: %s)", self._fast.provider_name)
         prompt = _PARSE_RESUME_PROMPT.format(resume_text=resume_text)
+        logger.info("[parse_resume] prompt built — %d chars — sending to AI...", len(prompt))
+
+        t_ai = time.monotonic()
         raw = await self._fast.complete(prompt, system=_PARSE_RESUME_SYSTEM)
+        logger.info("[parse_resume] AI responded in %.2fs — raw response length: %d chars", time.monotonic() - t_ai, len(raw))
+
+        logger.info("[parse_resume] parsing JSON response...")
         result = _parse_json(raw)
+        skill_count = len(result.get("skills", []))
+        logger.info("[parse_resume] DONE — extracted %d skills in %.2fs total", skill_count, time.monotonic() - t0)
+        logger.debug("[parse_resume] skills: %s", [s["skill_name"] for s in result.get("skills", [])])
+
         cache.put("parse_resume", result, resume_text)
         return result
 
     async def analyze_fit(self, job: dict, user_profile: dict) -> dict:
+        job_title = job.get("title", "?")
+        skill_count = len(user_profile.get("skills", []))
+        logger.info("[analyze_fit] START — job=%r  user_skills=%d", job_title, skill_count)
+        t0 = time.monotonic()
         if cached := cache.get("analyze_fit", job, user_profile):
+            logger.info("[analyze_fit] CACHE HIT (%.2fs)", time.monotonic() - t0)
             return cached
         prompt = _FIT_PROMPT.format(
             jd_text=json.dumps(job, indent=2),
             skill_graph_json=json.dumps(user_profile.get("skills", []), indent=2),
             variant_tags=", ".join(user_profile.get("variant_tags", ["general"])),
         )
+        logger.info("[analyze_fit] sending to %s — prompt %d chars", self._fast.provider_name, len(prompt))
+        t_ai = time.monotonic()
         raw = await self._fast.complete(prompt, system=_FIT_SYSTEM)
+        logger.info("[analyze_fit] AI responded in %.2fs — raw %d chars", time.monotonic() - t_ai, len(raw))
         result = _parse_json(raw)
+        logger.info("[analyze_fit] DONE %.2fs — fit_score=%s  action=%r  matched=%d  missing_required=%d",
+                    time.monotonic() - t0,
+                    result.get("fit_score"), result.get("action"),
+                    len(result.get("matched_skills", [])),
+                    len(result.get("missing_required", [])))
         cache.put("analyze_fit", result, job, user_profile)
         return result
 
@@ -201,15 +244,23 @@ class HireLoopAI:
         verified_skills: list[dict],
         user_evidence: str = "",
     ) -> str:
+        variant = fit.get("best_resume_variant", "general")
+        logger.info("[tailor_resume] START — job=%r  variant=%s  verified_skills=%d  base_resume=%d chars",
+                    job.get("title", "?"), variant, len(verified_skills), len(base_resume))
+        t0 = time.monotonic()
         prompt = _TAILOR_PROMPT.format(
-            variant_tag=fit.get("best_resume_variant", "general"),
+            variant_tag=variant,
             base_resume_text=base_resume,
             jd_text=json.dumps(job, indent=2),
             verified_skills_json=json.dumps(verified_skills, indent=2),
             user_evidence_text=user_evidence or "None provided.",
             requires_cl=str(job.get("requires_cover_letter", False)),
         )
-        return await self._quality.complete(prompt, system=_TAILOR_SYSTEM)
+        logger.info("[tailor_resume] sending to %s (quality) — prompt %d chars",
+                    self._quality.provider_name, len(prompt))
+        result = await self._quality.complete(prompt, system=_TAILOR_SYSTEM)
+        logger.info("[tailor_resume] DONE %.2fs — output %d chars", time.monotonic() - t0, len(result))
+        return result
 
     async def edit_resume(self, current_resume: str, instruction: str) -> str:
         """Apply a targeted edit to an already-generated resume.
@@ -218,6 +269,9 @@ class HireLoopAI:
         is preserved verbatim. Use this instead of tailor_resume() when the
         user asks to change one line, reword a bullet, adjust a section, etc.
         """
+        logger.info("[edit_resume] START — resume %d chars  instruction=%r",
+                    len(current_resume), instruction[:120])
+        t0 = time.monotonic()
         prompt = (
             "You are editing a resume. Apply ONLY the change described below.\n"
             "Do NOT rewrite, restructure, or touch anything else.\n"
@@ -226,25 +280,45 @@ class HireLoopAI:
             f"## Instruction\n{instruction}\n\n"
             "Return the full resume with only this edit applied."
         )
-        return await self._quality.complete(prompt, system="You are a precise resume editor.")
+        logger.info("[edit_resume] sending to %s (quality) — prompt %d chars",
+                    self._quality.provider_name, len(prompt))
+        result = await self._quality.complete(prompt, system="You are a precise resume editor.")
+        logger.info("[edit_resume] DONE %.2fs — output %d chars", time.monotonic() - t0, len(result))
+        return result
 
     async def write_cover_letter(
         self, job: dict, user_profile: dict, fit: dict
     ) -> str:
+        logger.info("[write_cover_letter] START — job=%r  fit_score=%s",
+                    job.get("title", "?"), fit.get("fit_score", "?"))
+        t0 = time.monotonic()
         prompt = _COVER_LETTER_PROMPT.format(
             jd_text=json.dumps(job, indent=2),
             user_profile_json=json.dumps(user_profile, indent=2),
             fit_json=json.dumps(fit, indent=2),
         )
-        return await self._quality.complete(prompt, system=_COVER_LETTER_SYSTEM)
+        logger.info("[write_cover_letter] sending to %s (quality) — prompt %d chars",
+                    self._quality.provider_name, len(prompt))
+        result = await self._quality.complete(prompt, system=_COVER_LETTER_SYSTEM)
+        logger.info("[write_cover_letter] DONE %.2fs — output %d chars", time.monotonic() - t0, len(result))
+        return result
 
     async def answer_screening_questions(
         self, questions: list[str], job: dict, user_profile: dict
     ) -> list[dict]:
+        logger.info("[answer_screening] START — job=%r  questions=%d",
+                    job.get("title", "?"), len(questions))
+        t0 = time.monotonic()
         prompt = _SCREENING_PROMPT.format(
             questions="\n".join(f"- {q}" for q in questions),
             jd_text=json.dumps(job, indent=2),
             user_profile_json=json.dumps(user_profile, indent=2),
         )
+        logger.info("[answer_screening] sending to %s (quality) — prompt %d chars",
+                    self._quality.provider_name, len(prompt))
+        t_ai = time.monotonic()
         raw = await self._quality.complete(prompt, system=_SCREENING_SYSTEM)
-        return _parse_json(raw)
+        logger.info("[answer_screening] AI responded in %.2fs — raw %d chars", time.monotonic() - t_ai, len(raw))
+        result = _parse_json(raw)
+        logger.info("[answer_screening] DONE %.2fs — answered %d questions", time.monotonic() - t0, len(result))
+        return result

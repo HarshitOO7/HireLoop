@@ -17,6 +17,8 @@ States:
 
 import io
 import logging
+import re
+import time
 import uuid
 from datetime import datetime
 
@@ -61,6 +63,32 @@ logger = logging.getLogger(__name__)
     SET_FIT_SCORE,
     RETURNING_USER,
 ) = range(12)
+
+
+# ── Skill normalization ─────────────────────────────────────────────────────
+
+# Suffixes that don't add meaning — "Drupal CMS" and "Drupal" are the same skill
+_REDUNDANT_SUFFIXES = re.compile(
+    r"\s+(cms|framework|db|database|server|sdk|api|platform|library|lang|language)$",
+    re.IGNORECASE,
+)
+# ".js" / " js" tail — "Vue.js" → "vue", "Vue JS" → "vue"
+_JS_SUFFIX = re.compile(r"[.\s]js$", re.IGNORECASE)
+
+
+def _normalize_skill(name: str) -> str:
+    """Return a canonical key for deduplication.
+
+    Examples:
+        "Drupal CMS"  → "drupal"
+        "Vue.js"      → "vue"
+        "Node JS"     → "node"
+        "PostgreSQL"  → "postgresql"
+    """
+    n = name.strip().lower()
+    n = _JS_SUFFIX.sub("", n)
+    n = _REDUNDANT_SUFFIXES.sub("", n)
+    return n.strip()
 
 
 # ── File text extraction ────────────────────────────────────────────────────
@@ -121,10 +149,12 @@ async def _save_onboarding_to_db(telegram_id: str, name: str, confirmed_skills: 
                 session.add(node)
                 await session.flush()
 
-                if skill.get("user_context"):
+                # Save evidence from: (a) user-typed context, or (b) AI-extracted resume evidence
+                context_text = skill.get("user_context", "") or skill.get("evidence", "")
+                if context_text:
                     evidence = SkillEvidence(
                         skill_node_id=node.id,
-                        user_context=skill["user_context"],
+                        user_context=context_text,
                         source="telegram" if skill["status"] == "verified_attested" else "resume",
                     )
                     session.add(evidence)
@@ -310,22 +340,46 @@ async def done_uploading(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     ai = context.application.bot_data["ai"]
     all_skills = []
+    t_total = time.monotonic()
 
-    for text in resume_texts:
+    logger.info("[done_uploading] starting resume analysis — %d file(s)", len(resume_texts))
+
+    for i, text in enumerate(resume_texts, 1):
+        logger.info("[done_uploading] parsing resume %d/%d — %d chars", i, len(resume_texts), len(text))
+        t_file = time.monotonic()
         try:
             parsed = await ai.parse_resume(text)
-            all_skills.extend(parsed.get("skills", []))
+            raw_skills = parsed.get("skills", [])
+            logger.info("[done_uploading] resume %d done in %.2fs — got %d raw skills: %s",
+                        i, time.monotonic() - t_file, len(raw_skills),
+                        [s["skill_name"] for s in raw_skills])
+            all_skills.extend(raw_skills)
         except Exception as e:
-            logger.error(f"Resume parse error: {e}")
+            logger.error("[done_uploading] resume %d parse error (%.2fs): %s", i, time.monotonic() - t_file, e)
 
-    # Deduplicate — keep highest confidence per skill name
+    logger.info("[done_uploading] all files parsed — %d total raw skills before dedup", len(all_skills))
+
+    # Deduplicate — normalize name first so "Drupal" and "Drupal CMS" collapse to one entry.
+    # Keep highest confidence per normalized key; preserve the original skill_name from the
+    # higher-confidence entry so the user sees a clean name.
     conf_rank = {"high": 3, "medium": 2, "low": 1}
     skill_map: dict = {}
     for s in all_skills:
-        key = s["skill_name"].lower()
-        if key not in skill_map or conf_rank.get(s["confidence"], 0) > conf_rank.get(skill_map[key]["confidence"], 0):
+        key = _normalize_skill(s["skill_name"])
+        existing_rank = conf_rank.get(skill_map[key]["confidence"], 0) if key in skill_map else -1
+        new_rank = conf_rank.get(s["confidence"], 0)
+        if key not in skill_map or new_rank > existing_rank:
+            if key in skill_map:
+                logger.debug("[done_uploading] dedup merge: '%s' supersedes '%s' (key=%s, %s > %s)",
+                             s["skill_name"], skill_map[key]["skill_name"], key,
+                             s["confidence"], skill_map[key]["confidence"])
             skill_map[key] = s
+        else:
+            logger.debug("[done_uploading] dedup drop: '%s' (key=%s) already covered by '%s'",
+                         s["skill_name"], key, skill_map[key]["skill_name"])
     merged = list(skill_map.values())
+    logger.info("[done_uploading] after dedup: %d unique skills (dropped %d duplicates) — total %.2fs",
+                len(merged), len(all_skills) - len(merged), time.monotonic() - t_total)
 
     if not merged:
         await query.message.reply_text(
@@ -339,7 +393,8 @@ async def done_uploading(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     high = [s for s in merged if s["confidence"] == "high"]
     pending = [s for s in merged if s["confidence"] in ("medium", "low")]
 
-    confirmed = [{**s, "status": "verified_resume", "user_context": ""} for s in high]
+    # Carry AI-extracted evidence as the initial user_context so it feeds SkillEvidence
+    confirmed = [{**s, "status": "verified_resume", "user_context": s.get("evidence", "")} for s in high]
     context.user_data["confirmed_skills"] = confirmed
     context.user_data["pending_skills"] = pending
     context.user_data["pending_idx"] = 0
@@ -365,7 +420,7 @@ async def skill_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await query.answer()
     idx = int(query.data.split("_")[-1])
     skill = context.user_data["pending_skills"][idx]
-    context.user_data["confirmed_skills"].append({**skill, "status": "verified_resume", "user_context": ""})
+    context.user_data["confirmed_skills"].append({**skill, "status": "verified_resume", "user_context": skill.get("evidence", "")})
     await query.edit_message_text(f"Confirmed: {skill['skill_name']} ✅")
     context.user_data["pending_idx"] = idx + 1
     return await _show_next_pending_skill(update, context)

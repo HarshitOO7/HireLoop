@@ -1,7 +1,11 @@
+import logging
+import time
+
 from openai import AsyncOpenAI
 from ai.base import AIProvider
 
 _DEFAULT_MODEL = "gpt-4o"
+logger = logging.getLogger(__name__)
 
 
 class OpenAIProvider(AIProvider):
@@ -17,6 +21,9 @@ class OpenAIProvider(AIProvider):
         return "openai"
 
     async def complete(self, prompt: str, system: str = "") -> str:
+        logger.debug("[openai] → model=%s  prompt=%d chars  system=%d chars",
+                     self._model, len(prompt), len(system))
+        t0 = time.monotonic()
         response = await self._client.chat.completions.create(
             model=self._model,
             messages=[
@@ -24,4 +31,12 @@ class OpenAIProvider(AIProvider):
                 {"role": "user", "content": prompt},
             ],
         )
-        return response.choices[0].message.content
+        elapsed = time.monotonic() - t0
+        text = response.choices[0].message.content
+        usage = response.usage
+        logger.debug("[openai] ← %.2fs  response=%d chars  tokens in=%s out=%s total=%s",
+                     elapsed, len(text),
+                     getattr(usage, "prompt_tokens", "?"),
+                     getattr(usage, "completion_tokens", "?"),
+                     getattr(usage, "total_tokens", "?"))
+        return text

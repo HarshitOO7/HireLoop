@@ -1,7 +1,11 @@
+import logging
+import time
+
 import google.generativeai as genai
 from ai.base import AIProvider
 
 _DEFAULT_MODEL = "gemini-2.0-flash"
+logger = logging.getLogger(__name__)
 
 
 class GeminiProvider(AIProvider):
@@ -16,5 +20,10 @@ class GeminiProvider(AIProvider):
 
     async def complete(self, prompt: str, system: str = "") -> str:
         full_prompt = f"{system}\n\n{prompt}" if system else prompt
+        logger.debug("[gemini] → model=%s  full_prompt=%d chars", self._model_name, len(full_prompt))
+        t0 = time.monotonic()
         response = await self._model.generate_content_async(full_prompt)
-        return response.text
+        elapsed = time.monotonic() - t0
+        text = response.text
+        logger.debug("[gemini] ← %.2fs  response=%d chars", elapsed, len(text))
+        return text

@@ -1,8 +1,12 @@
+import logging
 import os
+import time
+
 import httpx
 from ai.base import AIProvider
 
 _DEFAULT_MODEL = "llama3.2"
+logger = logging.getLogger(__name__)
 
 
 class OllamaProvider(AIProvider):
@@ -20,10 +24,20 @@ class OllamaProvider(AIProvider):
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
 
+        logger.debug("[ollama] → model=%s  host=%s  prompt=%d chars  system=%d chars",
+                     self._model, self._host, len(prompt), len(system))
+        t0 = time.monotonic()
         async with httpx.AsyncClient(timeout=120) as client:
             r = await client.post(
                 f"{self._host}/api/chat",
                 json={"model": self._model, "messages": messages, "stream": False},
             )
             r.raise_for_status()
-            return r.json()["message"]["content"]
+            data = r.json()
+        elapsed = time.monotonic() - t0
+        text = data["message"]["content"]
+        eval_count = data.get("eval_count", "?")
+        prompt_eval_count = data.get("prompt_eval_count", "?")
+        logger.debug("[ollama] ← %.2fs  response=%d chars  tokens in=%s out=%s",
+                     elapsed, len(text), prompt_eval_count, eval_count)
+        return text
