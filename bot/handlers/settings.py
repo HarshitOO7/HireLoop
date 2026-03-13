@@ -338,6 +338,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>HireLoop Commands</b>\n\n"
         "/start -- onboarding wizard (or re-run to update)\n"
         "/skills -- view your skill graph\n"
+        "/addskills -- add skills or upload a new resume\n"
         "/settings -- view all preferences\n"
         "/filters -- view current job filters\n"
         "/pause -- pause or resume job hunting\n"

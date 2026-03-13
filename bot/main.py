@@ -27,6 +27,7 @@ from telegram.ext import ApplicationHandlerStop
 from ai.factory import AIFactory
 from ai.service import HireLoopAI
 from bot.onboarding import build_onboarding_handler
+from bot.handlers.add_skills import build_add_skills_handler
 from bot.handlers.settings import get_settings_handlers
 from bot.keyboards import MAIN_KEYBOARD
 from db.models import Base
@@ -140,6 +141,7 @@ def main():
 
     # Register handlers — order matters (ConversationHandler first)
     app.add_handler(build_onboarding_handler())
+    app.add_handler(build_add_skills_handler())
 
     for h in get_settings_handlers():
         app.add_handler(h)

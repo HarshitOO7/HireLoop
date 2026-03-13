@@ -257,6 +257,12 @@ async def returning_user_choice(update: Update, context: ContextTypes.DEFAULT_TY
         context.user_data["done_btn_msg_id"] = sent.message_id
         return UPLOAD_RESUME
 
+    elif query.data == "returning_addskills":
+        await query.edit_message_text(
+            "Tap \u2018\ud83d\udcce Add Resume\u2019 on the keyboard below, or use /addskills to add skills manually."
+        )
+        return ConversationHandler.END
+
     else:  # returning_cancel
         await query.edit_message_text("All good, nothing changed.")
         return ConversationHandler.END

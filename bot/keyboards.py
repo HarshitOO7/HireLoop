@@ -11,9 +11,10 @@ def welcome_keyboard() -> InlineKeyboardMarkup:
 
 def returning_user_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎛️ Update filters", callback_data="returning_filters")],
-        [InlineKeyboardButton("📎 Re-upload resume", callback_data="returning_resume")],
-        [InlineKeyboardButton("❌ Nothing, cancel", callback_data="returning_cancel")],
+        [InlineKeyboardButton("🎛️ Update filters",   callback_data="returning_filters")],
+        [InlineKeyboardButton("➕ Add more skills",   callback_data="returning_addskills")],
+        [InlineKeyboardButton("📎 Re-upload resume",  callback_data="returning_resume")],
+        [InlineKeyboardButton("❌ Nothing, cancel",   callback_data="returning_cancel")],
     ])
 
 
@@ -64,6 +65,28 @@ def fit_score_keyboard() -> InlineKeyboardMarkup:
         InlineKeyboardButton("60%", callback_data="fit_60"),
         InlineKeyboardButton("70%", callback_data="fit_70"),
         InlineKeyboardButton("80%", callback_data="fit_80"),
+    ]])
+
+
+def add_skills_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📎 Upload resume",       callback_data="addskills_upload")],
+        [InlineKeyboardButton("✍️ Add skill manually",  callback_data="addskills_manual")],
+        [InlineKeyboardButton("❌ Cancel",               callback_data="addskills_cancel")],
+    ])
+
+
+def add_skill_done_uploading_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("Done uploading ✅", callback_data="add_done_uploading"),
+    ]])
+
+
+def add_skill_confirm_keyboard(idx: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Yes",          callback_data=f"add_confirm_{idx}"),
+        InlineKeyboardButton("✏️ Add context",  callback_data=f"add_ctx_{idx}"),
+        InlineKeyboardButton("❌ Skip",          callback_data=f"add_remove_{idx}"),
     ]])
 
 
