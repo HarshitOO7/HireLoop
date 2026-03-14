@@ -16,6 +16,16 @@ def _parse_json(raw: str) -> dict | list:
     text = re.sub(r"\s*```$", "", text.strip())
     return json.loads(text.strip())
 
+
+def _jc(obj) -> str:
+    """Compact JSON — no indentation, no wasted tokens."""
+    return json.dumps(obj, separators=(",", ":"))
+
+
+def _slim_job(job: dict, keys: tuple) -> str:
+    """Extract only the needed keys from a parsed job dict and return compact JSON."""
+    return _jc({k: job[k] for k in keys if k in job})
+
 _FIT_SYSTEM = """You are a job fit analyzer. Be conservative and honest. Never inflate scores.
 Return ONLY valid JSON. No preamble, no markdown fences, no explanation."""
 
@@ -218,9 +228,14 @@ class HireLoopAI:
         if cached := cache.get("analyze_fit", job, user_profile):
             logger.info("[analyze_fit] CACHE HIT (%.2fs)", time.monotonic() - t0)
             return cached
+        slim_skills = [
+            {"skill": s["skill_name"], "status": s.get("status", ""), "conf": s.get("confidence", "")}
+            for s in user_profile.get("skills", [])
+        ]
         prompt = _FIT_PROMPT.format(
-            jd_text=json.dumps(job, indent=2),
-            skill_graph_json=json.dumps(user_profile.get("skills", []), indent=2),
+            jd_text=_slim_job(job, ("title", "required_skills", "preferred_skills",
+                                    "seniority", "years_experience", "cover_letter_required")),
+            skill_graph_json=_jc(slim_skills),
             variant_tags=", ".join(user_profile.get("variant_tags", ["general"])),
         )
         logger.info("[analyze_fit] sending to %s — prompt %d chars", self._fast.provider_name, len(prompt))
@@ -251,8 +266,9 @@ class HireLoopAI:
         prompt = _TAILOR_PROMPT.format(
             variant_tag=variant,
             base_resume_text=base_resume,
-            jd_text=json.dumps(job, indent=2),
-            verified_skills_json=json.dumps(verified_skills, indent=2),
+            jd_text=_slim_job(job, ("title", "company", "required_skills", "preferred_skills",
+                                    "seniority", "years_experience", "cover_letter_keywords")),
+            verified_skills_json=_jc(verified_skills),
             user_evidence_text=user_evidence or "None provided.",
             requires_cl=str(job.get("requires_cover_letter", False)),
         )
@@ -292,10 +308,18 @@ class HireLoopAI:
         logger.info("[write_cover_letter] START — job=%r  fit_score=%s",
                     job.get("title", "?"), fit.get("fit_score", "?"))
         t0 = time.monotonic()
+        slim_profile = {
+            "name": user_profile.get("name", ""),
+            "skills": [s["skill_name"] for s in user_profile.get("skills", [])
+                       if s.get("status", "").startswith("verified_")],
+            "work_history": user_profile.get("work_history", []),
+        }
         prompt = _COVER_LETTER_PROMPT.format(
-            jd_text=json.dumps(job, indent=2),
-            user_profile_json=json.dumps(user_profile, indent=2),
-            fit_json=json.dumps(fit, indent=2),
+            jd_text=_slim_job(job, ("title", "company", "location", "required_skills",
+                                    "preferred_skills", "cover_letter_keywords", "seniority")),
+            user_profile_json=_jc(slim_profile),
+            fit_json=_jc({"score": fit.get("fit_score"), "matched": fit.get("matched_skills"),
+                          "gaps": fit.get("missing_required")}),
         )
         logger.info("[write_cover_letter] sending to %s (quality) — prompt %d chars",
                     self._quality.provider_name, len(prompt))
@@ -309,10 +333,16 @@ class HireLoopAI:
         logger.info("[answer_screening] START — job=%r  questions=%d",
                     job.get("title", "?"), len(questions))
         t0 = time.monotonic()
+        slim_profile = {
+            "name": user_profile.get("name", ""),
+            "skills": [s["skill_name"] for s in user_profile.get("skills", [])
+                       if s.get("status", "").startswith("verified_")],
+            "work_history": user_profile.get("work_history", []),
+        }
         prompt = _SCREENING_PROMPT.format(
             questions="\n".join(f"- {q}" for q in questions),
-            jd_text=json.dumps(job, indent=2),
-            user_profile_json=json.dumps(user_profile, indent=2),
+            jd_text=_slim_job(job, ("title", "company", "required_skills", "preferred_skills")),
+            user_profile_json=_jc(slim_profile),
         )
         logger.info("[answer_screening] sending to %s (quality) — prompt %d chars",
                     self._quality.provider_name, len(prompt))
