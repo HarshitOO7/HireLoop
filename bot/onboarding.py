@@ -15,6 +15,7 @@ States:
   SET_FIT_SCORE        → button choice → save to DB → DONE
 """
 
+import asyncio
 import io
 import logging
 import re
@@ -34,11 +35,14 @@ from telegram.ext import (
 
 from bot.keyboards import (
     MAIN_KEYBOARD,
+    _ALL_SITES,
     done_uploading_keyboard,
     fit_score_keyboard,
     frequency_keyboard,
+    location_keyboard,
     remote_keyboard,
     returning_user_keyboard,
+    sites_keyboard,
     skip_keyboard,
     skill_confirm_keyboard,
     welcome_keyboard,
@@ -56,13 +60,15 @@ logger = logging.getLogger(__name__)
     CONFIRM_SKILL_CONTEXT,
     SET_FILTERS_ROLE,
     SET_FILTERS_LOCATION,
+    SET_FILTERS_COUNTRY,
     SET_FILTERS_REMOTE,
+    SET_FILTERS_SITES,
     SET_FILTERS_SALARY,
     SET_FILTERS_BLACKLIST,
     SET_FREQUENCY,
     SET_FIT_SCORE,
     RETURNING_USER,
-) = range(12)
+) = range(14)
 
 
 # ── Skill normalization ─────────────────────────────────────────────────────
@@ -249,12 +255,11 @@ async def returning_user_choice(update: Update, context: ContextTypes.DEFAULT_TY
     elif query.data == "returning_resume":
         context.user_data.clear()
         context.user_data["resume_texts"] = []
-        sent = await query.edit_message_text(
+        await query.edit_message_text(
             "Send your updated resume — PDF or Word doc.\n"
             "Your existing skills will be replaced with the new ones.",
-            reply_markup=done_uploading_keyboard(),
         )
-        context.user_data["done_btn_msg_id"] = sent.message_id
+        context.user_data["done_btn_msg_id"] = None
         return UPLOAD_RESUME
 
     elif query.data == "returning_addskills":
@@ -271,14 +276,12 @@ async def returning_user_choice(update: Update, context: ContextTypes.DEFAULT_TY
 async def welcome_clicked(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
-    sent = await query.edit_message_text(
+    await query.edit_message_text(
         "Send me your resume — PDF or Word doc.\n\n"
-        "You can send up to 4 files (different versions are fine). "
-        "Tap *Done uploading* when finished.",
+        "You can send up to 4 files (different versions are fine).",
         parse_mode="Markdown",
-        reply_markup=done_uploading_keyboard(),
     )
-    context.user_data["done_btn_msg_id"] = sent.message_id
+    context.user_data["done_btn_msg_id"] = None
     return UPLOAD_RESUME
 
 
@@ -342,28 +345,38 @@ async def done_uploading(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
         return UPLOAD_RESUME
 
-    await query.edit_message_text("Analyzing your resume(s)... one moment.")
-
+    n = len(resume_texts)
     ai = context.application.bot_data["ai"]
-    all_skills = []
     t_total = time.monotonic()
 
-    logger.info("[done_uploading] starting resume analysis — %d file(s)", len(resume_texts))
+    await query.edit_message_text(
+        f"Got it! Parsing {'your resume' if n == 1 else f'all {n} resumes in parallel'}...\n"
+        "This usually takes ~30 seconds — hang tight!"
+    )
 
-    for i, text in enumerate(resume_texts, 1):
-        logger.info("[done_uploading] parsing resume %d/%d — %d chars", i, len(resume_texts), len(text))
+    logger.info("[done_uploading] starting resume analysis — %d file(s)", n)
+
+    async def _parse_one(i: int, text: str) -> list:
+        logger.info("[done_uploading] parsing resume %d/%d — %d chars", i, n, len(text))
         t_file = time.monotonic()
         try:
             parsed = await ai.parse_resume(text)
             raw_skills = parsed.get("skills", [])
-            logger.info("[done_uploading] resume %d done in %.2fs — got %d raw skills: %s",
-                        i, time.monotonic() - t_file, len(raw_skills),
-                        [s["skill_name"] for s in raw_skills])
-            all_skills.extend(raw_skills)
+            logger.info("[done_uploading] resume %d done in %.2fs — %d raw skills", i, time.monotonic() - t_file, len(raw_skills))
+            return raw_skills
         except Exception as e:
             logger.error("[done_uploading] resume %d parse error (%.2fs): %s", i, time.monotonic() - t_file, e)
+            return []
+
+    results = await asyncio.gather(*[_parse_one(i, t) for i, t in enumerate(resume_texts, 1)])
+    all_skills = [s for batch in results for s in batch]
 
     logger.info("[done_uploading] all files parsed — %d total raw skills before dedup", len(all_skills))
+
+    await query.edit_message_text(
+        f"Resume{'s' if n > 1 else ''} parsed! Found {len(all_skills)} skills.\n"
+        "Building your skill graph..."
+    )
 
     # Deduplicate — normalize name first so "Drupal" and "Drupal CMS" collapse to one entry.
     # Keep highest confidence per normalized key; preserve the original skill_name from the
@@ -388,7 +401,7 @@ async def done_uploading(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 len(merged), len(all_skills) - len(merged), time.monotonic() - t_total)
 
     if not merged:
-        await query.message.reply_text(
+        await query.edit_message_text(
             "Couldn't extract skills from the resume. Let's skip to filters for now."
         )
         context.user_data["confirmed_skills"] = []
@@ -407,14 +420,17 @@ async def done_uploading(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     if high:
         names = ", ".join(s["skill_name"] for s in high)
-        await query.message.reply_text(
-            f"Found *{len(merged)}* skills. Auto-confirmed {len(high)} high-confidence:\n\n"
+        await query.edit_message_text(
+            f"Impressive! Found *{len(merged)}* skills. Auto-confirmed {len(high)} high-confidence:\n\n"
             f"{names}\n\n"
             f"Now let's verify the other {len(pending)}.",
             parse_mode="Markdown",
         )
     else:
-        await query.message.reply_text(f"Found {len(merged)} skills to verify.")
+        await query.edit_message_text(
+            f"Found *{len(merged)}* skills to verify.",
+            parse_mode="Markdown",
+        )
 
     return await _show_next_pending_skill(update, context)
 
@@ -490,26 +506,67 @@ async def skill_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 async def set_filters_role(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.setdefault("filters", {})["role"] = update.message.text.strip()
-    await update.message.reply_text(
-        "Where are you looking?\n\nExample: Toronto, ON  |  Remote  |  Canada",
-        reply_markup=skip_keyboard("location"),
-    )
-    return SET_FILTERS_LOCATION
-
-
-async def set_filters_location(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    context.user_data["filters"]["location"] = update.message.text.strip()
+    context.user_data["filters"]["locations"] = []  # start fresh list
     await update.message.reply_text("Remote preference?", reply_markup=remote_keyboard())
     return SET_FILTERS_REMOTE
 
 
-async def skip_location(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def set_filters_location(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """User typed a location — add it to the list and prompt for more."""
+    loc = update.message.text.strip()
+    locs: list = context.user_data.setdefault("filters", {}).setdefault("locations", [])
+    locs.append(loc)
+    count = len(locs)
+    await update.message.reply_text(
+        f"Added: *{loc}*\n\n"
+        f"Locations so far: {', '.join(locs)}\n\n"
+        "Send another location or tap Done.",
+        parse_mode="Markdown",
+        reply_markup=location_keyboard(count),
+    )
+    return SET_FILTERS_LOCATION
+
+
+async def done_locations(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """User tapped Done (or skip with 0 locations) — proceed to job boards."""
     query = update.callback_query
     await query.answer()
-    context.user_data.setdefault("filters", {})["location"] = ""
-    await query.edit_message_text("Location: any")
-    await query.message.reply_text("Remote preference?", reply_markup=remote_keyboard())
-    return SET_FILTERS_REMOTE
+    locs = context.user_data.get("filters", {}).get("locations", [])
+    if locs:
+        await query.edit_message_text(f"Locations: {', '.join(locs)}")
+    else:
+        await query.edit_message_text("Location: any")
+    return await _ask_sites(query.message, context)
+
+
+async def set_filters_country(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    country = update.message.text.strip()
+    context.user_data["filters"]["country"] = country
+    await update.message.reply_text(
+        f"Which *city or region* in {country}?\n\n"
+        "Type one and send — you can add multiple.\n"
+        f"Examples: Toronto, ON · Vancouver · Calgary\n\n"
+        "Want nationwide? Tap Skip.",
+        parse_mode="Markdown",
+        reply_markup=location_keyboard(0),
+    )
+    return SET_FILTERS_LOCATION
+
+
+async def skip_country(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    context.user_data.setdefault("filters", {})["country"] = ""
+    await query.edit_message_text("Country: any")
+    await query.message.reply_text(
+        "Which *city or region* are you targeting?\n\n"
+        "Type one and send — you can add multiple.\n"
+        "Examples: Toronto, ON · Vancouver · New York · London\n\n"
+        "Want no city filter? Tap Skip.",
+        parse_mode="Markdown",
+        reply_markup=location_keyboard(0),
+    )
+    return SET_FILTERS_LOCATION
 
 
 async def set_filters_remote(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -518,6 +575,51 @@ async def set_filters_remote(update: Update, context: ContextTypes.DEFAULT_TYPE)
     mapping = {"remote_yes": "remote", "remote_hybrid": "hybrid", "remote_any": "any"}
     context.user_data["filters"]["remote"] = mapping.get(query.data, "any")
     await query.edit_message_text(f"Remote: {context.user_data['filters']['remote']}")
+    await query.message.reply_text(
+        "Which country are you looking for jobs in?\n\n"
+        "This sets the job board (e.g. Canada → indeed.ca, USA → indeed.com).\n\n"
+        "Examples: Canada · USA · UK · Australia · India\n\n"
+        "Tap Skip for global results.",
+        reply_markup=skip_keyboard("country"),
+    )
+    return SET_FILTERS_COUNTRY
+
+
+async def _ask_sites(message, context) -> int:
+    # Initialise all sites as selected (default)
+    context.user_data["filters"]["sites"] = list(_ALL_SITES)
+    await message.reply_text(
+        "Which job boards should I scrape?\n\n"
+        "⚡ = fast   🐢 = slower but more listings\n"
+        "All are selected by default. Tap to toggle off.",
+        reply_markup=sites_keyboard(context.user_data["filters"]["sites"]),
+    )
+    return SET_FILTERS_SITES
+
+
+async def toggle_site(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Toggle a site on/off and refresh the keyboard."""
+    query = update.callback_query
+    await query.answer()
+    site = query.data.replace("toggle_site_", "")
+    selected: list = context.user_data.setdefault("filters", {}).setdefault("sites", list(_ALL_SITES))
+    if site in selected:
+        if len(selected) > 1:  # always keep at least one
+            selected.remove(site)
+        else:
+            await query.answer("Keep at least one site selected.", show_alert=True)
+            return SET_FILTERS_SITES
+    else:
+        selected.append(site)
+    await query.edit_message_reply_markup(reply_markup=sites_keyboard(selected))
+    return SET_FILTERS_SITES
+
+
+async def sites_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    selected = context.user_data.get("filters", {}).get("sites", list(_ALL_SITES))
+    await query.edit_message_text(f"Job boards: {', '.join(selected)}")
     await query.message.reply_text(
         "Minimum salary? (annual, in your currency)\n\nExample: 80000",
         reply_markup=skip_keyboard("salary"),
@@ -664,10 +766,18 @@ def build_onboarding_handler() -> ConversationHandler:
             ],
             SET_FILTERS_LOCATION: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, set_filters_location),
-                CallbackQueryHandler(skip_location, pattern="skip_location"),
+                CallbackQueryHandler(done_locations, pattern="done_locations"),
+            ],
+            SET_FILTERS_COUNTRY: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, set_filters_country),
+                CallbackQueryHandler(skip_country, pattern="skip_country"),
             ],
             SET_FILTERS_REMOTE: [
                 CallbackQueryHandler(set_filters_remote, pattern=r"^remote_"),
+            ],
+            SET_FILTERS_SITES: [
+                CallbackQueryHandler(toggle_site,  pattern=r"^toggle_site_"),
+                CallbackQueryHandler(sites_done,   pattern="^sites_done$"),
             ],
             SET_FILTERS_SALARY: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, set_filters_salary),

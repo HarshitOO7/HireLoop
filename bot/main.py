@@ -29,9 +29,16 @@ from ai.service import HireLoopAI
 from bot.onboarding import build_onboarding_handler
 from bot.handlers.add_skills import build_add_skills_handler
 from bot.handlers.settings import get_settings_handlers
+from bot.handlers.skill_verify import (
+    build_skill_verify_handler,
+    get_job_card_handlers,
+    get_jobs_command_handler,
+    cmd_pending_jobs,
+)
 from bot.keyboards import MAIN_KEYBOARD
 from db.models import Base
 from db.session import engine
+from jobs.scheduler import build_scheduler
 
 logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -60,6 +67,7 @@ async def handle_keyboard_buttons(update, context):
         "⚙️ Settings":     cmd_settings,
         "🎛️ Edit Filters": cmd_filters,
         "⏸ Pause Agent":  cmd_pause,
+        "📋 Pending Jobs": cmd_pending_jobs,
     }
     handler = routes.get(text)
     if handler:
@@ -117,7 +125,25 @@ def main():
     ai = HireLoopAI(fast_provider=fast, quality_provider=quality)
     logger.info(f"AI ready — fast: {fast.provider_name}, quality: {quality.provider_name}")
 
-    app = Application.builder().token(token).build()
+    async def _post_init(application):
+        scheduler = build_scheduler(application.bot, ai)
+        scheduler.start()
+        application.bot_data["scheduler"] = scheduler
+        logger.info("APScheduler started — scrapes at 08:00 and 18:00 daily")
+
+    async def _post_stop(application):
+        scheduler = application.bot_data.get("scheduler")
+        if scheduler and scheduler.running:
+            scheduler.shutdown(wait=False)
+            logger.info("APScheduler stopped")
+
+    app = (
+        Application.builder()
+        .token(token)
+        .post_init(_post_init)
+        .post_stop(_post_stop)
+        .build()
+    )
     app.bot_data["ai"] = ai
 
     # Allowlist gate — runs before every handler (group -1)
@@ -139,11 +165,17 @@ def main():
 
         app.add_handler(TypeHandler(Update, auth_gate), group=-1)
 
-    # Register handlers — order matters (ConversationHandler first)
+    # Register handlers — order matters (ConversationHandlers first)
     app.add_handler(build_onboarding_handler())
     app.add_handler(build_add_skills_handler())
+    app.add_handler(build_skill_verify_handler())
 
     for h in get_settings_handlers():
+        app.add_handler(h)
+
+    app.add_handler(get_jobs_command_handler())
+
+    for h in get_job_card_handlers():
         app.add_handler(h)
 
     # Catch-all for persistent keyboard taps

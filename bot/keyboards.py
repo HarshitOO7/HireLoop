@@ -49,6 +49,33 @@ def skip_keyboard(step: str) -> InlineKeyboardMarkup:
     ]])
 
 
+def location_keyboard(count: int = 0) -> InlineKeyboardMarkup:
+    if count == 0:
+        label = "⏭ Skip (no location)"
+    else:
+        label = f"Done ✅ ({count} location{'s' if count > 1 else ''} added)"
+    return InlineKeyboardMarkup([[InlineKeyboardButton(label, callback_data="done_locations")]])
+
+
+_ALL_SITES = ["indeed", "linkedin", "glassdoor", "google"]
+_SITE_LABELS = {
+    "indeed":    "Indeed ⚡",
+    "linkedin":  "LinkedIn ⚡",
+    "glassdoor": "Glassdoor 🐢 slow",
+    "google":    "Google 🐢 slow",
+}
+
+
+def sites_keyboard(selected: list[str]) -> InlineKeyboardMarkup:
+    """Toggle buttons for each job board. ✅ = currently selected."""
+    rows = []
+    for site in _ALL_SITES:
+        label = ("✅ " if site in selected else "") + _SITE_LABELS[site]
+        rows.append([InlineKeyboardButton(label, callback_data=f"toggle_site_{site}")])
+    rows.append([InlineKeyboardButton("Done ✅", callback_data="sites_done")])
+    return InlineKeyboardMarkup(rows)
+
+
 def frequency_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [

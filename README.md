@@ -8,7 +8,7 @@
     <img src="https://img.shields.io/badge/telegram-bot-2CA5E0?style=flat-square&logo=telegram&logoColor=white" />
     <img src="https://img.shields.io/badge/AI-multi--provider-8A2BE2?style=flat-square" />
     <img src="https://img.shields.io/badge/database-SQLite%20%7C%20PostgreSQL-003B57?style=flat-square&logo=sqlite&logoColor=white" />
-    <img src="https://img.shields.io/badge/phase-2%20%2F%204-orange?style=flat-square" />
+    <img src="https://img.shields.io/badge/phase-3%20%2F%204-orange?style=flat-square" />
     <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" />
   </p>
 </p>
@@ -50,9 +50,12 @@ Scrape jobs  →  Score fit  →  Verify skills  →  Generate resume  →  You 
 | Interactive skill verify flow (confirm / add context / remove) | ✅ Done |
 | HTML skill graph report (sent as file, opens in browser) | ✅ Done |
 | Settings, filters, pause/resume | ✅ Done |
-| Job scraping (JobSpy — Indeed, LinkedIn, Glassdoor, Google) | 🔜 Week 3 |
-| URL-paste job ingestion (Jina Reader) | 🔜 Week 3 |
-| Fit scoring + job notification cards | 🔜 Week 3 |
+| Job scraping (JobSpy — Indeed, LinkedIn, Glassdoor, Google) | ✅ Done |
+| URL-paste job ingestion (Jina Reader) | ✅ Done |
+| Fit scoring + job notification cards | ✅ Done |
+| Skill verification dialog (gap skills → evidence → DB) | ✅ Done |
+| APScheduler — daily scrape at 08:00 + 18:00 | ✅ Done |
+| /jobs command + 📋 Pending Jobs keyboard button | ✅ Done |
 | Resume tailoring + PDF export (reportlab) | 🔜 Week 4 |
 | Cover letter generation (on request only) | 🔜 Week 4 |
 | Application logging | 🔜 Week 4 |
@@ -548,9 +551,11 @@ applications
 - [x] Skill deduplication
 - [x] Post-onboarding skill management
 - [x] HTML skill graph report
-- [ ] Job scraper (JobSpy)
-- [ ] URL-paste ingestion (Jina Reader)
-- [ ] Fit scoring notification cards
+- [x] Job scraper (JobSpy)
+- [x] URL-paste ingestion (Jina Reader)
+- [x] Fit scoring notification cards
+- [x] Skill verification dialog
+- [x] APScheduler daily scrape loop
 - [ ] Resume generator + PDF export
 - [ ] Application logging
 
