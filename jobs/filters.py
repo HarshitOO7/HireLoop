@@ -19,24 +19,42 @@ def url_hash(url: str) -> str:
     return hashlib.sha256((url or "").encode()).hexdigest()[:16]
 
 
+def semantic_key(job: dict) -> tuple[str, str]:
+    """Normalized (title, company) tuple — used for cross-board dedup before AI calls."""
+    return (
+        (job.get("title") or "").lower().strip(),
+        (job.get("company") or "").lower().strip(),
+    )
+
+
 def apply_filters(
     raw_jobs: list[dict],
     user_filters: dict,
     seen_hashes: set[str],
+    seen_keys: set[tuple] | None = None,
 ) -> list[dict]:
     """
     Filter raw JobSpy results. Returns a filtered list with 'url_hash' added to each entry.
+
+    Dedup order (cheapest first — no AI called until a job passes all these):
+      1. No description → skip
+      2. URL hash match → skip (exact same URL seen before)
+      3. Semantic match (title+company) → skip (same job reposted on another board)
+      4. Blacklist → skip
+      5. Salary gate → skip
 
     Args:
         raw_jobs:     List of dicts from jobspy DataFrame.to_dict("records")
         user_filters: User.filters JSON — role, location, remote, min_salary, blacklist
         seen_hashes:  Set of url_hash values already in DB for this user
+        seen_keys:    Set of (title, company) tuples already in DB — cross-board dedup
     """
-    blacklist = [b.lower().strip() for b in (user_filters.get("blacklist") or []) if b]
+    blacklist  = [b.lower().strip() for b in (user_filters.get("blacklist") or []) if b]
     min_salary = int(user_filters.get("min_salary") or 0)
+    _seen_keys = seen_keys or set()
 
     out = []
-    skipped_nodesc = skipped_seen = skipped_blacklist = skipped_salary = 0
+    skipped_nodesc = skipped_seen = skipped_semantic = skipped_blacklist = skipped_salary = 0
 
     for job in raw_jobs:
         desc = (job.get("description") or "").strip()
@@ -50,13 +68,17 @@ def apply_filters(
             skipped_seen += 1
             continue
 
-        company = (job.get("company") or "").lower()
-        title   = (job.get("title") or "").lower()
+        key = semantic_key(job)
+        if key in _seen_keys:
+            skipped_semantic += 1
+            continue
+
+        company = key[1]
+        title   = key[0]
         if blacklist and any(term in company or term in title for term in blacklist):
             skipped_blacklist += 1
             continue
 
-        # Only gate on salary when job explicitly advertises a max that's below threshold
         max_sal = job.get("max_amount") or job.get("max_salary")
         if min_salary and max_sal:
             try:
@@ -64,14 +86,14 @@ def apply_filters(
                     skipped_salary += 1
                     continue
             except (TypeError, ValueError):
-                pass  # unparseable salary — let it through
+                pass
 
         job["url_hash"] = h
         out.append(job)
 
     logger.info(
-        "[filters] in=%d  out=%d | skipped: no_desc=%d  seen=%d  blacklist=%d  salary=%d",
+        "[filters] in=%d  out=%d | skipped: no_desc=%d  url=%d  semantic=%d  blacklist=%d  salary=%d",
         len(raw_jobs), len(out),
-        skipped_nodesc, skipped_seen, skipped_blacklist, skipped_salary,
+        skipped_nodesc, skipped_seen, skipped_semantic, skipped_blacklist, skipped_salary,
     )
     return out

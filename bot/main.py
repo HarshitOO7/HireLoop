@@ -21,7 +21,7 @@ load_dotenv()
 warnings.filterwarnings("ignore", message=".*per_message.*", category=UserWarning)
 
 from telegram import Update
-from telegram.ext import Application, MessageHandler, TypeHandler, filters
+from telegram.ext import Application, CommandHandler, MessageHandler, TypeHandler, filters
 from telegram.ext import ApplicationHandlerStop
 
 from ai.factory import AIFactory
@@ -38,7 +38,7 @@ from bot.handlers.skill_verify import (
 from bot.keyboards import MAIN_KEYBOARD
 from db.models import Base
 from db.session import engine
-from jobs.scheduler import build_scheduler
+from jobs.scheduler import build_scheduler, run_scrape_cycle
 
 logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -57,6 +57,22 @@ logging.getLogger("apscheduler").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 
+async def cmd_fetch_now(update: Update, context) -> None:
+    """Trigger an immediate scrape for the calling user."""
+    tg_id = str(update.effective_user.id)
+    msg = await update.message.reply_text("Searching for jobs now... this may take a minute.")
+    ai = context.application.bot_data["ai"]
+    try:
+        notified = await run_scrape_cycle(context.bot, ai, telegram_id=tg_id)
+        if notified:
+            await msg.edit_text(f"Done! Found {notified} new job{'s' if notified != 1 else ''}.")
+        else:
+            await msg.edit_text("Done! No new jobs right now. Try again later or adjust your filters with 🎛️ Edit Filters.")
+    except Exception as e:
+        logger.error("fetchnow error for user=%s: %s", tg_id, e, exc_info=True)
+        await msg.edit_text("Something went wrong. Check the logs.")
+
+
 async def handle_keyboard_buttons(update, context):
     """Route persistent reply keyboard button taps to the right handler."""
     from bot.handlers.settings import cmd_skills, cmd_settings, cmd_filters, cmd_pause
@@ -68,6 +84,7 @@ async def handle_keyboard_buttons(update, context):
         "🎛️ Edit Filters": cmd_filters,
         "⏸ Pause Agent":  cmd_pause,
         "📋 Pending Jobs": cmd_pending_jobs,
+        "🔍 Fetch Jobs":   cmd_fetch_now,
     }
     handler = routes.get(text)
     if handler:
@@ -174,6 +191,7 @@ def main():
         app.add_handler(h)
 
     app.add_handler(get_jobs_command_handler())
+    app.add_handler(CommandHandler("fetchnow", cmd_fetch_now))
 
     for h in get_job_card_handlers():
         app.add_handler(h)

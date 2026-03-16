@@ -11,15 +11,15 @@ Each cycle:
 
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from bot.keyboards import job_card_keyboard
 from db.models import Job, SkillNode, User
 from db.session import AsyncSessionLocal
-from jobs.filters import apply_filters, url_hash
+from jobs.filters import apply_filters, semantic_key, url_hash
 from jobs.scraper import scrape_for_user
 
 logger = logging.getLogger(__name__)
@@ -27,9 +27,15 @@ logger = logging.getLogger(__name__)
 
 # ── DB helpers ───────────────────────────────────────────────────────────────
 
-async def _get_seen_hashes(user_id: str, session) -> set[str]:
-    result = await session.execute(select(Job.url_hash).where(Job.user_id == user_id))
-    return {row[0] for row in result if row[0]}
+async def _get_seen(user_id: str, session) -> tuple[set[str], set[tuple]]:
+    """One query — returns (url_hashes, semantic_keys) for fast pre-AI dedup."""
+    result = await session.execute(
+        select(Job.url_hash, Job.title, Job.company).where(Job.user_id == user_id)
+    )
+    rows = result.all()
+    hashes = {r[0] for r in rows if r[0]}
+    keys   = {((r[1] or "").lower().strip(), (r[2] or "").lower().strip()) for r in rows}
+    return hashes, keys
 
 
 async def _get_user_profile(user_id: str, session) -> dict:
@@ -68,22 +74,22 @@ def _build_card_text(job: Job, parsed: dict, fit: dict) -> str:
 
 # ── Per-user scrape + notify ─────────────────────────────────────────────────
 
-async def _process_user(user: User, bot, ai) -> None:
+async def _process_user(user: User, bot, ai) -> int:
     logger.info("[scheduler] processing user=%s", user.telegram_id)
 
     raw_jobs = await scrape_for_user(user)
     if not raw_jobs:
-        return
+        return 0
 
     async with AsyncSessionLocal() as session:
         async with session.begin():
-            seen    = await _get_seen_hashes(user.id, session)
+            seen_hashes, seen_keys = await _get_seen(user.id, session)
             profile = await _get_user_profile(user.id, session)
 
-    filtered = apply_filters(raw_jobs, user.filters or {}, seen)
+    filtered = apply_filters(raw_jobs, user.filters or {}, seen_hashes, seen_keys)
     if not filtered:
         logger.info("[scheduler] no new jobs after filtering for user=%s", user.telegram_id)
-        return
+        return 0
 
     notified = 0
 
@@ -136,27 +142,61 @@ async def _process_user(user: User, bot, ai) -> None:
                     continue
 
     logger.info("[scheduler] done — user=%s  notified=%d", user.telegram_id, notified)
+    return notified
+
+
+# ── Cleanup ──────────────────────────────────────────────────────────────────
+
+async def _purge_old_jobs(days: int = 10) -> int:
+    """Delete jobs older than `days` days. Runs at the start of each scrape cycle."""
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            result = await session.execute(
+                delete(Job).where(
+                    Job.created_at < cutoff,
+                    Job.status.in_(["pending", "skipped", "skill_verify"]),
+                )
+            )
+    deleted = result.rowcount
+    if deleted:
+        logger.info("[scheduler] purged %d job(s) older than %d days", deleted, days)
+    return deleted
 
 
 # ── Main cycle ───────────────────────────────────────────────────────────────
 
-async def run_scrape_cycle(bot, ai) -> None:
-    """Entry point called by APScheduler. Processes all onboarded users."""
-    logger.info("[scheduler] ── scrape cycle starting ──")
+async def run_scrape_cycle(bot, ai, telegram_id: str | None = None) -> int:
+    """
+    Entry point called by APScheduler or /fetchnow.
+    Pass telegram_id to run for a single user only.
+    Returns total jobs notified across all processed users.
+    """
+    logger.info("[scheduler] ── scrape cycle starting%s ──",
+                f" (user={telegram_id})" if telegram_id else "")
 
     async with AsyncSessionLocal() as session:
-        result = await session.execute(select(User).where(User.onboarded == True))
+        query = select(User).where(User.onboarded == True)
+        if telegram_id:
+            query = query.where(User.telegram_id == str(telegram_id))
+        result = await session.execute(query)
         users  = result.scalars().all()
 
     logger.info("[scheduler] %d onboarded user(s) to process", len(users))
 
+    if not telegram_id:  # only purge on full scheduled cycles, not manual fetches
+        await _purge_old_jobs(days=10)
+
+    total = 0
     for user in users:
         try:
-            await _process_user(user, bot, ai)
+            n = await _process_user(user, bot, ai)
+            total += n or 0
         except Exception as e:
             logger.error("[scheduler] unhandled error for user=%s: %s", user.telegram_id, e, exc_info=True)
 
-    logger.info("[scheduler] ── scrape cycle complete ──")
+    logger.info("[scheduler] ── scrape cycle complete — total notified=%d ──", total)
+    return total
 
 
 # ── Scheduler factory ────────────────────────────────────────────────────────
