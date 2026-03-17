@@ -120,9 +120,10 @@ def add_skill_confirm_keyboard(idx: int) -> InlineKeyboardMarkup:
 # ── Persistent main keyboard (always visible) ──────────────────────────────
 
 MAIN_KEYBOARD = ReplyKeyboardMarkup([
-    ["📎 Add Resume", "🎛️ Edit Filters"],
-    ["📊 My Skills",  "📋 Pending Jobs"],
-    ["⏸ Pause Agent", "⚙️ Settings"],
+    ["📎 Add Resume",  "🎛️ Edit Filters"],
+    ["📊 My Skills",   "📋 Pending Jobs"],
+    ["🔍 Fetch Jobs",  "⚙️ Settings"],
+    ["⏸ Pause Agent"],
 ], resize_keyboard=True)
 
 

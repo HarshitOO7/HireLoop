@@ -150,6 +150,20 @@ _COVER_LETTER_PROMPT = """Write a cover letter for this job application.
 
 Write a professional, personalized cover letter. 3 paragraphs max. No fluff."""
 
+_EXPAND_ROLES_SYSTEM = """You are a job search expert. Return ONLY a valid JSON array of strings. No preamble, no markdown."""
+
+_EXPAND_ROLES_PROMPT = """The user is targeting these job titles:
+{role_titles}
+
+Generate 6–8 common job title variations that job boards actually post. Rules:
+- Keep each title SHORT (2–4 words max) — used as search keywords
+- Cover seniority-neutral variants and adjacent titles
+- Include common abbreviations (e.g. "SWE", "MLE")
+- No descriptions, no explanations
+
+Return a JSON array:
+["Title 1", "Title 2", ...]"""
+
 _SCREENING_SYSTEM = "Answer screening questions honestly based on the candidate's verified experience."
 
 _SCREENING_PROMPT = """Answer these screening questions for a job application.
@@ -325,6 +339,23 @@ class HireLoopAI:
                     self._quality.provider_name, len(prompt))
         result = await self._quality.complete(prompt, system=_COVER_LETTER_SYSTEM)
         logger.info("[write_cover_letter] DONE %.2fs — output %d chars", time.monotonic() - t0, len(result))
+        return result
+
+    async def expand_role_titles(self, role_titles: str) -> list[str]:
+        """Expand comma-separated role titles into 6–8 job-board-friendly search variants."""
+        logger.info("[expand_roles] START — input=%r", role_titles[:80])
+        t0 = time.monotonic()
+        if cached := cache.get("expand_roles", role_titles):
+            logger.info("[expand_roles] CACHE HIT (%.2fs)", time.monotonic() - t0)
+            return cached
+        prompt = _EXPAND_ROLES_PROMPT.format(role_titles=role_titles)
+        raw = await self._fast.complete(prompt, system=_EXPAND_ROLES_SYSTEM)
+        result = _parse_json(raw)
+        if not isinstance(result, list):
+            result = [role_titles]
+        logger.info("[expand_roles] DONE %.2fs — %d variants: %s",
+                    time.monotonic() - t0, len(result), result)
+        cache.put("expand_roles", result, role_titles)
         return result
 
     async def answer_screening_questions(

@@ -9,13 +9,13 @@ httpx
 python-telegram-bot[job-queue]
 
 # Job scraping
-jobspy2
+python-jobspy
 # httpx already listed above (used by Jina Reader too)
 
 # Database
 sqlalchemy[asyncio]
 aiosqlite
-alembic
+alembic+
 
 # Config
 python-dotenv

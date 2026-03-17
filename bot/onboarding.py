@@ -199,8 +199,12 @@ async def _show_next_pending_skill(update: Update, context: ContextTypes.DEFAULT
 
 async def _ask_role(msg) -> int:
     await msg.reply_text(
-        "What role(s) are you targeting?\n\n"
-        "Example: Software Engineer, Backend Developer, Full Stack"
+        "What job title(s) are you targeting?\n\n"
+        "Type one or more *job titles* separated by commas — these become your search keywords, "
+        "so keep them short and specific.\n\n"
+        "✅ `Software Engineer, AI Engineer, Full Stack Developer`\n"
+        "❌ `I am looking for software roles in AI...`",
+        parse_mode="Markdown",
     )
     return SET_FILTERS_ROLE
 

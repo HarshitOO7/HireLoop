@@ -202,7 +202,7 @@ async def cmd_skills(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_name = user.name or update.effective_user.first_name or "Your"
     summary = (
         f"<b>Skill Graph</b> \u2014 {len(nodes)} skills total\n"
-        + " &nbsp;|&nbsp; ".join(parts)
+        + " | ".join(parts)
         + "\n\n<i>Full visual report attached \u2193</i>"
     )
 
@@ -350,6 +350,11 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Resend the main keyboard — useful after bot restarts."""
+    await update.message.reply_text("Here's your menu.", reply_markup=MAIN_KEYBOARD)
+
+
 def get_settings_handlers():
     return [
         CommandHandler("skills", cmd_skills),
@@ -358,4 +363,5 @@ def get_settings_handlers():
         CommandHandler("settings", cmd_settings),
         CommandHandler("filters", cmd_filters),
         CommandHandler("help", cmd_help),
+        CommandHandler("menu", cmd_menu),
     ]

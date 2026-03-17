@@ -6,6 +6,10 @@ to avoid blocking the async event loop.
 
 Multiple locations: if user.filters["locations"] is a list, one scrape is run
 per location and results are merged. Deduplication happens downstream in filters.py.
+
+Role variants: if role_variants is passed (AI-expanded title list), each variant
+is searched separately and results are merged. Semantic dedup collapses cross-board
+duplicates before any AI calls.
 """
 
 import asyncio
@@ -18,10 +22,11 @@ logger = logging.getLogger(__name__)
 _DEFAULT_SITES = ["indeed", "linkedin", "glassdoor", "google"]
 
 
-async def scrape_for_user(user) -> list[dict]:
+async def scrape_for_user(user, role_variants: list[str] | None = None) -> list[dict]:
     """
     Scrape jobs for a user based on their stored filters.
-    All scrape parameters come from user.filters — nothing hardcoded.
+    role_variants: AI-expanded title list (e.g. ["Software Engineer", "SWE", "Backend Dev"]).
+                   Falls back to user.filters["role"] if not provided.
     Returns a list of raw job dicts (from jobspy DataFrame).
     """
     f = user.filters or {}
@@ -35,7 +40,8 @@ async def scrape_for_user(user) -> list[dict]:
     if not locations and f.get("location"):
         locations = [(f.get("location") or "").strip()]
 
-    if not role:
+    search_terms = role_variants or ([role] if role else [])
+    if not search_terms:
         logger.warning("[scraper] user %s has no role filter — skipping scrape", user.telegram_id)
         return []
 
@@ -43,8 +49,9 @@ async def scrape_for_user(user) -> list[dict]:
     search_locations = locations or [""]  # [""] = no location filter
 
     logger.info(
-        "[scraper] starting — user=%s  role=%r  locations=%s  country=%r  remote=%s  sites=%s",
-        user.telegram_id, role, locations or "any", country, remote, sites,
+        "[scraper] starting — user=%s  variants=%d %s  locations=%s  country=%r  remote=%s  sites=%s",
+        user.telegram_id, len(search_terms), search_terms,
+        locations or "any", country, remote, sites,
     )
 
     def _sync_scrape():
@@ -52,26 +59,33 @@ async def scrape_for_user(user) -> list[dict]:
         from jobspy import scrape_jobs
 
         all_dfs = []
-        for loc in search_locations:
-            kwargs = dict(
-                site_name=sites,
-                search_term=role,
-                is_remote=is_remote,
-                results_wanted=25,
-                hours_old=24,
-            )
-            if loc:
-                kwargs["location"] = loc
-            if country:
-                kwargs["country_indeed"] = country
+        # Distribute results budget across variants so total stays ~25
+        per_variant = max(5, 25 // len(search_terms))
 
-            try:
-                df = scrape_jobs(**kwargs)
-                if df is not None and not df.empty:
-                    all_dfs.append(df)
-                    logger.debug("[scraper] location=%r → %d results", loc or "any", len(df))
-            except Exception as e:
-                logger.error("[scraper] scrape failed for location=%r: %s", loc, e)
+        for term in search_terms:
+            for loc in search_locations:
+                kwargs = dict(
+                    site_name=sites,
+                    search_term=term,
+                    is_remote=is_remote,
+                    results_wanted=per_variant,
+                    hours_old=24,
+                    fetch_description=True,
+                )
+                if loc:
+                    kwargs["location"] = loc
+                if country:
+                    kwargs["country_indeed"] = country
+
+                try:
+                    df = scrape_jobs(**kwargs)
+                    if df is not None and not df.empty:
+                        all_dfs.append(df)
+                        logger.debug("[scraper] term=%r location=%r → %d results",
+                                     term, loc or "any", len(df))
+                except Exception as e:
+                    logger.error("[scraper] scrape failed for term=%r location=%r: %s",
+                                 term, loc, e)
 
         if not all_dfs:
             return None
@@ -89,5 +103,6 @@ async def scrape_for_user(user) -> list[dict]:
         return []
 
     records = df.fillna("").to_dict("records")
-    logger.info("[scraper] got %d raw jobs (across %d location(s))", len(records), len(search_locations))
+    logger.info("[scraper] got %d raw jobs (across %d variant(s) × %d location(s))",
+                len(records), len(search_terms), len(search_locations))
     return records

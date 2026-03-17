@@ -691,16 +691,43 @@
         <li class="now">Multi-tenant isolation</li>
         <li class="now">Browser extension clip-to-agent</li>
         <li class="now">Kubernetes deployment</li>
+        <li class="fut">RAG fit scoring — embed job descriptions + skill graph, cosine similarity replaces/augments LLM fit call (sentence-transformers or embeddings API). Better recall on title variants, faster at scale.</li>
       </ul>
     </div>
   </div>
 
-  <p class="subtit">Phase 1 — Week-by-Week</p>
+  <p class="subtit">Phase 1 — Week-by-Week (Actual Build — Updated 2026-03-16)</p>
   <div class="g4">
-    <div class="wb"><div class="wn">Week 1</div><div class="wbody">SQLite schema + skill graph tables. Telegram bot setup in n8n. Claude API connection + basic parse test. Onboarding wizard skeleton.</div></div>
-    <div class="wb"><div class="wn">Week 2</div><div class="wbody">Multi-resume upload → skill extraction flow. Onboarding confirmation dialog. Job filters setup. SerpAPI + Firecrawl connection and intake pipeline.</div></div>
-    <div class="wb"><div class="wn">Week 3</div><div class="wbody">Fit scoring + relevance gate. Skill verification dialog with evidence capture. Graph update on reply. Cover letter JD detection. Resume generation with Claude.</div></div>
-    <div class="wb"><div class="wn">Week 4</div><div class="wbody">PDF export. Telegram file delivery. Approve / Edit / Skip inline buttons. Application logging. Docker Compose bundle. End-to-end test with 1 friend.</div></div>
+    <div class="wb"><div class="wn">Week 1 ✅</div><div class="wbody">AI layer (Groq fast + Anthropic quality). All 6 AI tasks: parse_job, parse_resume, analyze_fit, tailor_resume, write_cover_letter, answer_screening. SQLite + aiosqlite models. Alembic migration. Smoke test script.</div></div>
+    <div class="wb"><div class="wn">Week 2 ✅</div><div class="wbody">Telegram bot + full 6-step onboarding wizard (PTB ConversationHandler). Multi-resume upload with parallel parsing + asyncio.gather. Skill graph verification dialog. Persistent reply keyboard. Settings + skill graph HTML report. /skills, /settings, /filters, /pause, /help, /menu commands.</div></div>
+    <div class="wb"><div class="wn">Week 3 ✅</div><div class="wbody">JobSpy scraper (Indeed, LinkedIn, Glassdoor, Google) with fetch_description=True. Two-layer dedup: URL hash + semantic (title+company). Blacklist + salary gate. APScheduler 08:00/18:00 daily cycles. /fetchnow instant scrape. Job card notifications with fit score + skill gap. Auto-purge stale jobs after 10 days (preserves applied). AI role title expansion (6–8 variants, 24h cache). URL paste → Jina Reader → instant job card.</div></div>
+    <div class="wb" style="border-color:rgba(251,191,36,.3);"><div class="wn" style="color:#fbbf24;">Week 4 ← NEXT</div><div class="wbody">Resume tailoring + PDF export (reportlab). Conditional cover letter. Job approval flow (Approve / Edit / Skip buttons). Application logging to DB. Docker Compose bundle. End-to-end test: fetch job → approve → PDF delivered.</div></div>
+  </div>
+
+  <p class="subtit" style="margin-top:32px;">🔴 Session Checkpoint — 2026-03-16</p>
+  <div style="background:var(--surface);border:1px solid var(--border2);border-radius:10px;padding:20px;font-size:13px;line-height:1.8;color:var(--muted2);">
+    <div style="color:var(--green);font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;margin-bottom:10px;">✅ Completed This Session</div>
+    <ul style="list-style:none;padding:0;margin:0 0 16px 0;">
+      <li>• Fixed <code>jobspy2</code> → <code>python-jobspy</code> (correct pip package)</li>
+      <li>• Added <code>fetch_description=True</code> to JobSpy — was dropping all jobs (no_desc filter)</li>
+      <li>• Fixed onboarding role prompt to require short job titles, not sentences</li>
+      <li>• Updated user's DB role to clean comma-separated titles</li>
+      <li>• AI role title expansion: <code>ai.expand_role_titles()</code> → 6–8 variants, cached 24h in <code>user.filters["role_variants"]</code></li>
+      <li>• Scraper loops over all variants, distributes <code>results_wanted</code> budget across them</li>
+      <li>• Removed <code>&amp;nbsp;</code> from skill graph summary message</li>
+      <li>• Added <code>🔍 Fetch Jobs</code> button to main keyboard</li>
+      <li>• Added URL paste handler — paste any job link, get instant fit analysis card</li>
+      <li>• Added <code>/menu</code> command to refresh keyboard after bot restarts</li>
+    </ul>
+    <div style="color:var(--amber);font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;margin-bottom:10px;">⏭ Next Session — Week 4</div>
+    <ul style="list-style:none;padding:0;margin:0;">
+      <li>• <code>resume/generator.py</code> — tailor_resume → markdown</li>
+      <li>• <code>resume/pdf_export.py</code> — reportlab PDF from markdown</li>
+      <li>• <code>bot/handlers/job_approval.py</code> — Approve / Edit / Skip buttons wired to resume gen</li>
+      <li>• Application record saved to DB on approval</li>
+      <li>• <code>docker-compose.yml</code> for easy deploy</li>
+      <li>• End-to-end test: /fetchnow → approve job → PDF sent to Telegram</li>
+    </ul>
   </div>
 </div>
 

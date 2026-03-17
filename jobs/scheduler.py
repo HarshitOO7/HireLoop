@@ -10,11 +10,12 @@ Each cycle:
 """
 
 import logging
+import time
 import uuid
 from datetime import datetime, timedelta
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 
 from bot.keyboards import job_card_keyboard
 from db.models import Job, SkillNode, User
@@ -74,10 +75,50 @@ def _build_card_text(job: Job, parsed: dict, fit: dict) -> str:
 
 # ── Per-user scrape + notify ─────────────────────────────────────────────────
 
+_VARIANTS_TTL = 86_400  # refresh expanded titles once per day
+
+
+async def _get_role_variants(user: User, ai) -> list[str]:
+    """
+    Return AI-expanded role title variants for this user.
+    Cached in user.filters["role_variants"] for 24 h to avoid daily AI calls.
+    """
+    f = user.filters or {}
+    role = (f.get("role") or "").strip()
+    if not role:
+        return []
+
+    cached_at = f.get("role_variants_at", 0)
+    cached    = f.get("role_variants") or []
+
+    if cached and (time.time() - cached_at) < _VARIANTS_TTL:
+        logger.info("[scheduler] role variants cache hit for user=%s — %d variants",
+                    user.telegram_id, len(cached))
+        return cached
+
+    logger.info("[scheduler] expanding role titles for user=%s — role=%r", user.telegram_id, role)
+    try:
+        variants = await ai.expand_role_titles(role)
+    except Exception as e:
+        logger.error("[scheduler] role expansion failed: %s — falling back to raw role", e)
+        return [role]
+
+    new_filters = {**f, "role_variants": variants, "role_variants_at": time.time()}
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            await session.execute(
+                update(User).where(User.id == user.id).values(filters=new_filters)
+            )
+    logger.info("[scheduler] cached %d role variants for user=%s: %s",
+                len(variants), user.telegram_id, variants)
+    return variants
+
+
 async def _process_user(user: User, bot, ai) -> int:
     logger.info("[scheduler] processing user=%s", user.telegram_id)
 
-    raw_jobs = await scrape_for_user(user)
+    role_variants = await _get_role_variants(user, ai)
+    raw_jobs = await scrape_for_user(user, role_variants=role_variants or None)
     if not raw_jobs:
         return 0
 

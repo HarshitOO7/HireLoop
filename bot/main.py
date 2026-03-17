@@ -38,7 +38,8 @@ from bot.handlers.skill_verify import (
 from bot.keyboards import MAIN_KEYBOARD
 from db.models import Base
 from db.session import engine
-from jobs.scheduler import build_scheduler, run_scrape_cycle
+from jobs.scheduler import build_scheduler, run_scrape_cycle, _get_user_profile, _build_card_text
+from jobs.parser import fetch_jd_from_url
 
 logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -73,6 +74,78 @@ async def cmd_fetch_now(update: Update, context) -> None:
         await msg.edit_text("Something went wrong. Check the logs.")
 
 
+async def _handle_url_paste(update: Update, context, url: str) -> None:
+    """Parse a job from a pasted URL and send a job card."""
+    import uuid
+    from datetime import datetime
+    from sqlalchemy import select
+    from db.models import Job, User
+    from db.session import AsyncSessionLocal
+    from jobs.filters import url_hash
+    from bot.keyboards import job_card_keyboard
+
+    tg_id = str(update.effective_user.id)
+    ai = context.application.bot_data["ai"]
+    msg = await update.message.reply_text("Fetching job details from that link...")
+
+    try:
+        jd_text = await fetch_jd_from_url(url)
+    except Exception as e:
+        logger.error("URL fetch failed for %s: %s", url, e)
+        await msg.edit_text("Couldn't fetch that link. Make sure it's a public job posting URL.")
+        return
+
+    await msg.edit_text("Got it! Analyzing fit...")
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(User).where(User.telegram_id == tg_id)
+        )
+        user = result.scalar_one_or_none()
+
+    if not user:
+        await msg.edit_text("Finish onboarding first with /start.")
+        return
+
+    async with AsyncSessionLocal() as session:
+        profile = await _get_user_profile(user.id, session)
+
+    try:
+        parsed = await ai.parse_job(jd_text)
+        fit    = await ai.analyze_fit(parsed, profile)
+    except Exception as e:
+        logger.error("AI error for URL job: %s", e)
+        await msg.edit_text("AI analysis failed. Try again in a moment.")
+        return
+
+    job_url = url
+    job = Job(
+        id=str(uuid.uuid4()),
+        user_id=user.id,
+        title=parsed.get("title") or "Unknown",
+        company=parsed.get("company") or "Unknown",
+        url=job_url,
+        url_hash=url_hash(job_url),
+        raw_jd=jd_text[:10_000],
+        parsed={**parsed, "_fit": fit},
+        fit_score=fit.get("fit_score", 0),
+        cover_letter_required=bool(parsed.get("requires_cover_letter")),
+        status="pending",
+        created_at=datetime.utcnow(),
+    )
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            session.add(job)
+
+    card_text = _build_card_text(job, parsed, fit)
+    await msg.delete()
+    await update.message.reply_text(
+        card_text,
+        parse_mode="Markdown",
+        reply_markup=job_card_keyboard(job.id, job_url),
+    )
+
+
 async def handle_keyboard_buttons(update, context):
     """Route persistent reply keyboard button taps to the right handler."""
     from bot.handlers.settings import cmd_skills, cmd_settings, cmd_filters, cmd_pause
@@ -89,6 +162,8 @@ async def handle_keyboard_buttons(update, context):
     handler = routes.get(text)
     if handler:
         await handler(update, context)
+    elif text.startswith("http://") or text.startswith("https://"):
+        await _handle_url_paste(update, context, text)
     else:
         await update.message.reply_text(
             "Use the keyboard buttons or type a command.\n/help for the full list."
