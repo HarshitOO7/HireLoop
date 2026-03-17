@@ -134,11 +134,31 @@ async def _process_user(user: User, bot, ai) -> int:
 
     notified = 0
 
+    # Build keyword set from user skills for fast pre-filter
+    skill_keywords = {
+        s["skill_name"].lower()
+        for s in profile.get("skills", [])
+        if s.get("status", "").startswith("verified_")
+    }
+    # Also add short words (2+ chars) from each skill name for partial matching
+    skill_tokens: set[str] = set()
+    for sk in skill_keywords:
+        skill_tokens.update(w for w in sk.split() if len(w) >= 2)
+
     async with AsyncSessionLocal() as session:
         async with session.begin():
             for raw in filtered[:10]:  # cap at 10 notifications per cycle
                 try:
                     desc   = raw.get("description") or ""
+
+                    # Fast keyword pre-filter: skip AI entirely if no skill overlap
+                    if skill_keywords or skill_tokens:
+                        desc_lower = desc.lower()
+                        has_overlap = any(kw in desc_lower for kw in skill_keywords) or                                       any(tok in desc_lower for tok in skill_tokens)
+                        if not has_overlap:
+                            logger.debug("[scheduler] keyword pre-filter: no skill overlap — skip (saves 2 AI calls)")
+                            continue
+
                     parsed = await ai.parse_job(desc)
                     fit    = await ai.analyze_fit(parsed, profile)
                     score  = fit.get("fit_score", 0)

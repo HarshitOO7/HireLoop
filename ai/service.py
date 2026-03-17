@@ -9,12 +9,26 @@ logger = logging.getLogger(__name__)
 
 
 def _parse_json(raw: str) -> dict | list:
-    """Strip markdown fences and parse JSON. Models sometimes wrap despite instructions."""
+    """Strip markdown fences and parse JSON. Falls back to brace/bracket extraction."""
     text = raw.strip()
     # Remove ```json ... ``` or ``` ... ``` fences
     text = re.sub(r"^```(?:json)?\s*", "", text)
     text = re.sub(r"\s*```$", "", text.strip())
-    return json.loads(text.strip())
+    text = text.strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        # Try to extract the first JSON object or array from the response
+        for start_char, end_char in [("{", "}"), ("[", "]")]:
+            start = text.find(start_char)
+            end   = text.rfind(end_char)
+            if start != -1 and end != -1 and end > start:
+                try:
+                    return json.loads(text[start:end + 1])
+                except json.JSONDecodeError:
+                    pass
+        logger.error("[_parse_json] could not parse JSON from response (first 200 chars): %r", text[:200])
+        raise
 
 
 def _jc(obj) -> str:

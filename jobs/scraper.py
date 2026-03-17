@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 # Default: all supported sites. Users can toggle during onboarding.
 # Note: Glassdoor and Google are slower than Indeed/LinkedIn.
-_DEFAULT_SITES = ["indeed", "linkedin", "glassdoor", "google"]
+_DEFAULT_SITES = ["indeed", "linkedin", "google"]
 
 
 async def scrape_for_user(user, role_variants: list[str] | None = None) -> list[dict]:

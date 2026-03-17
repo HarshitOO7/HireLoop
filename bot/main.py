@@ -55,6 +55,8 @@ logging.getLogger("telegram").setLevel(logging.INFO)
 logging.getLogger("aiosqlite").setLevel(logging.WARNING)
 logging.getLogger("sqlalchemy").setLevel(logging.WARNING)
 logging.getLogger("apscheduler").setLevel(logging.WARNING)
+logging.getLogger("urllib3").setLevel(logging.WARNING)
+logging.getLogger("JobSpy").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 
