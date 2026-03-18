@@ -1,5 +1,5 @@
 """
-JobSpy wrapper — scrapes Indeed, LinkedIn, Glassdoor, Google Jobs.
+JobSpy wrapper — scrapes Indeed and Google Jobs.
 
 JobSpy is synchronous (pandas-based), so we run it in a thread executor
 to avoid blocking the async event loop.
@@ -10,6 +10,16 @@ per location and results are merged. Deduplication happens downstream in filters
 Role variants: if role_variants is passed (AI-expanded title list), each variant
 is searched separately and results are merged. Semantic dedup collapses cross-board
 duplicates before any AI calls.
+
+Secondary sources:
+  Adzuna API (free, set ADZUNA_APP_ID + ADZUNA_APP_KEY in .env) runs in parallel
+  and its results are merged before filtering. Adds Canada/global coverage + more
+  job descriptions.
+
+hours_old is derived from user.notify_freq so we never show stale duplicates:
+  twice_daily → 12 h
+  daily       → 24 h  (default)
+  realtime    → 6 h
 """
 
 import asyncio
@@ -17,23 +27,31 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Default: all supported sites. Users can toggle during onboarding.
-# Note: Glassdoor and Google are slower than Indeed/LinkedIn.
-_DEFAULT_SITES = ["indeed", "linkedin", "google"]
+# LinkedIn removed: jobspy can no longer fetch descriptions — all results
+# return empty description and get dropped by the no-description filter.
+# Glassdoor removed: consistently returns API errors.
+_DEFAULT_SITES = ["indeed", "google"]
+
+
+def _hours_for_freq(notify_freq: str | None) -> int:
+    """Return look-back window in hours based on the user's notify frequency."""
+    return {"twice_daily": 12, "realtime": 6}.get(notify_freq or "daily", 24)
 
 
 async def scrape_for_user(user, role_variants: list[str] | None = None) -> list[dict]:
     """
     Scrape jobs for a user based on their stored filters.
+
     role_variants: AI-expanded title list (e.g. ["Software Engineer", "SWE", "Backend Dev"]).
                    Falls back to user.filters["role"] if not provided.
-    Returns a list of raw job dicts (from jobspy DataFrame).
+    Returns merged job dicts from JobSpy + Adzuna (if configured).
     """
     f = user.filters or {}
-    role    = (f.get("role") or "").strip()
-    country = (f.get("country") or "").strip()
-    remote  = f.get("remote", "any")
-    sites   = f.get("sites") or _DEFAULT_SITES
+    role      = (f.get("role") or "").strip()
+    country   = (f.get("country") or "").strip()
+    remote    = f.get("remote", "any")
+    sites     = f.get("sites") or _DEFAULT_SITES
+    hours_old = _hours_for_freq(getattr(user, "notify_freq", None))
 
     # Support both old single-string "location" and new list "locations"
     locations: list[str] = f.get("locations") or []
@@ -49,17 +67,18 @@ async def scrape_for_user(user, role_variants: list[str] | None = None) -> list[
     search_locations = locations or [""]  # [""] = no location filter
 
     logger.info(
-        "[scraper] starting — user=%s  variants=%d %s  locations=%s  country=%r  remote=%s  sites=%s",
+        "[scraper] starting — user=%s  variants=%d %s  locations=%s  country=%r  "
+        "remote=%s  sites=%s  hours_old=%d",
         user.telegram_id, len(search_terms), search_terms,
-        locations or "any", country, remote, sites,
+        locations or "any", country, remote, sites, hours_old,
     )
 
+    # ── JobSpy (sync, runs in thread executor) ────────────────────────────────
     def _sync_scrape():
         import pandas as pd
         from jobspy import scrape_jobs
 
         all_dfs = []
-        # Distribute results budget across variants so total stays ~25
         per_variant = max(5, 25 // len(search_terms))
 
         for term in search_terms:
@@ -69,7 +88,7 @@ async def scrape_for_user(user, role_variants: list[str] | None = None) -> list[
                     search_term=term,
                     is_remote=is_remote,
                     results_wanted=per_variant,
-                    hours_old=24,
+                    hours_old=hours_old,
                     fetch_description=True,
                 )
                 if loc:
@@ -81,28 +100,55 @@ async def scrape_for_user(user, role_variants: list[str] | None = None) -> list[
                     df = scrape_jobs(**kwargs)
                     if df is not None and not df.empty:
                         all_dfs.append(df)
-                        logger.debug("[scraper] term=%r location=%r → %d results",
+                        logger.debug("[scraper] jobspy term=%r location=%r → %d results",
                                      term, loc or "any", len(df))
                 except Exception as e:
-                    logger.error("[scraper] scrape failed for term=%r location=%r: %s",
+                    logger.error("[scraper] jobspy failed term=%r location=%r: %s",
                                  term, loc, e)
 
         if not all_dfs:
             return None
         return pd.concat(all_dfs, ignore_index=True)
 
+    # ── Run JobSpy + Adzuna concurrently ─────────────────────────────────────
+    from jobs.adzuna_scraper import scrape_adzuna
+
     loop = asyncio.get_event_loop()
-    try:
-        df = await loop.run_in_executor(None, _sync_scrape)
-    except Exception as e:
-        logger.error("[scraper] scrape failed: %s", e, exc_info=True)
-        return []
+    adzuna_country  = (country[:2].lower() if len(country) >= 2 else "ca")
+    first_location  = locations[0] if locations else ""
+    per_term_budget = max(5, 25 // len(search_terms))
 
-    if df is None or df.empty:
-        logger.info("[scraper] no results returned")
-        return []
+    jobspy_future = loop.run_in_executor(None, _sync_scrape)
+    adzuna_coro   = scrape_adzuna(
+        search_terms=search_terms,
+        location=first_location,
+        country=adzuna_country,
+        hours_old=hours_old,
+        results_per_term=per_term_budget,
+    )
 
-    records = df.fillna("").to_dict("records")
-    logger.info("[scraper] got %d raw jobs (across %d variant(s) × %d location(s))",
-                len(records), len(search_terms), len(search_locations))
-    return records
+    results = await asyncio.gather(jobspy_future, adzuna_coro, return_exceptions=True)
+    df_result, adzuna_jobs = results[0], results[1]
+
+    if isinstance(df_result, Exception):
+        logger.error("[scraper] jobspy raised: %s", df_result)
+        df_result = None
+    if isinstance(adzuna_jobs, Exception):
+        logger.error("[scraper] adzuna raised: %s", adzuna_jobs)
+        adzuna_jobs = []
+
+    jobspy_records: list[dict] = []
+    if df_result is not None:
+        try:
+            if not df_result.empty:
+                jobspy_records = df_result.fillna("").to_dict("records")
+        except Exception:
+            pass
+
+    all_records = jobspy_records + list(adzuna_jobs or [])
+    logger.info(
+        "[scraper] total %d raw jobs (jobspy=%d  adzuna=%d) — %d term(s) × %d location(s)",
+        len(all_records), len(jobspy_records), len(adzuna_jobs or []),
+        len(search_terms), len(search_locations),
+    )
+    return all_records

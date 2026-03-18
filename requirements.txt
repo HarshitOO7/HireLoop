@@ -10,12 +10,16 @@ python-telegram-bot[job-queue]
 
 # Job scraping
 python-jobspy
-# httpx already listed above (used by Jina Reader too)
+# httpx already listed above (used by Jina Reader + Adzuna API too)
+
+# Adzuna free job API client (optional — only needed if ADZUNA_APP_ID is set)
+# Register free at https://developer.adzuna.com
+# pip install httpx  ← already listed above, that's all Adzuna needs
 
 # Database
 sqlalchemy[asyncio]
 aiosqlite
-alembic+
+alembic
 
 # Config
 python-dotenv

@@ -67,11 +67,13 @@ def apply_filters(
         if h in seen_hashes:
             skipped_seen += 1
             continue
+        seen_hashes.add(h)  # dedup within this scrape cycle too
 
         key = semantic_key(job)
         if key in _seen_keys:
             skipped_semantic += 1
             continue
+        _seen_keys.add(key)  # dedup within this scrape cycle too
 
         company = key[1]
         title   = key[0]
