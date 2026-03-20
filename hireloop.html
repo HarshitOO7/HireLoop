@@ -209,7 +209,7 @@
   <div class="vpill"><span class="vlive"></span>HireLoop v2 — Updated Blueprint</div>
   <h1><span class="g1">Hire</span><span class="g2">Loop</span></h1>
   <p style="font-size:clamp(14px,2vw,20px);font-weight:500;opacity:.55;margin-top:8px;letter-spacing:-.01em;">Human-in-the-Loop Autonomous Job Hunter</p>
-  <p class="hsub">Claude × n8n × Telegram → Local First → SaaS Later</p>
+  <p class="hsub">Claude × Telegram × APScheduler → Local First → SaaS Later</p>
   <div class="hbadges">
     <span class="hb on">Phase 1 Active</span>
     <span class="hb">Telegram-First</span>
@@ -312,7 +312,7 @@
           <span class="picon">⚡</span>
           <div class="ptitle">Relevance Gate</div>
           <div class="pdesc">Only jobs above your threshold (e.g. 60%) reach Telegram. Below threshold → silently logged, you never see them.</div>
-          <span class="pb auto">n8n IF node</span>
+          <span class="pb auto">APScheduler</span>
         </div></div>
 
         <div class="pcon"><svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5l7 7-7 7"/></svg></div>
@@ -704,29 +704,38 @@
     <div class="wb" style="border-color:rgba(251,191,36,.3);"><div class="wn" style="color:#fbbf24;">Week 4 ← NEXT</div><div class="wbody">Resume tailoring + PDF export (reportlab). Conditional cover letter. Job approval flow (Approve / Edit / Skip buttons). Application logging to DB. Docker Compose bundle. End-to-end test: fetch job → approve → PDF delivered.</div></div>
   </div>
 
-  <p class="subtit" style="margin-top:32px;">🔴 Session Checkpoint — 2026-03-16</p>
-  <div style="background:var(--surface);border:1px solid var(--border2);border-radius:10px;padding:20px;font-size:13px;line-height:1.8;color:var(--muted2);">
-    <div style="color:var(--green);font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;margin-bottom:10px;">✅ Completed This Session</div>
-    <ul style="list-style:none;padding:0;margin:0 0 16px 0;">
+  <p class="subtit" style="margin-top:32px;">✅ Session Checkpoint — 2026-03-16</p>
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;font-size:13px;line-height:1.8;color:var(--muted2);margin-bottom:16px;">
+    <ul style="list-style:none;padding:0;margin:0;">
       <li>• Fixed <code>jobspy2</code> → <code>python-jobspy</code> (correct pip package)</li>
       <li>• Added <code>fetch_description=True</code> to JobSpy — was dropping all jobs (no_desc filter)</li>
       <li>• Fixed onboarding role prompt to require short job titles, not sentences</li>
-      <li>• Updated user's DB role to clean comma-separated titles</li>
       <li>• AI role title expansion: <code>ai.expand_role_titles()</code> → 6–8 variants, cached 24h in <code>user.filters["role_variants"]</code></li>
       <li>• Scraper loops over all variants, distributes <code>results_wanted</code> budget across them</li>
       <li>• Removed <code>&amp;nbsp;</code> from skill graph summary message</li>
-      <li>• Added <code>🔍 Fetch Jobs</code> button to main keyboard</li>
-      <li>• Added URL paste handler — paste any job link, get instant fit analysis card</li>
-      <li>• Added <code>/menu</code> command to refresh keyboard after bot restarts</li>
+      <li>• Added <code>🔍 Fetch Jobs</code> button to main keyboard + <code>/menu</code> command</li>
+    </ul>
+  </div>
+
+  <p class="subtit" style="margin-top:16px;">🔴 Session Checkpoint — 2026-03-19</p>
+  <div style="background:var(--surface);border:1px solid var(--border2);border-radius:10px;padding:20px;font-size:13px;line-height:1.8;color:var(--muted2);">
+    <div style="color:var(--green);font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;margin-bottom:10px;">✅ Completed This Session</div>
+    <ul style="list-style:none;padding:0;margin:0 0 16px 0;">
+      <li>• Confirmed scraper working — 25 jobs found, semantic dedup active. Root issue: <code>no_desc=25</code> all jobs dropping because descriptions not returned. <code>fetch_description=True</code> needs verification.</li>
+      <li>• Fixed skill graph summary message: replaced <code>&amp;#x2705;</code> HTML entities with plain Unicode emoji (✅ 📄 ⚠️ ❌) — Telegram HTML mode doesn't render all numeric entities</li>
+      <li>• Decided on RAG strategy: Option A (AI role title expansion) already done. Option B (embedding-based fit scoring with sentence-transformers / cosine similarity) deferred to Phase 3, low priority.</li>
+      <li>• Updated README.md: /fetchnow, /menu, 🔍 Fetch Jobs keyboard, correct onboarding filter order, semantic dedup, role expansion, auto-purge, Phase 3 RAG entry</li>
+      <li>• Updated hireloop.html: replaced all n8n refs with APScheduler, all WeasyPrint refs with reportlab, subtitle updated</li>
     </ul>
     <div style="color:var(--amber);font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;margin-bottom:10px;">⏭ Next Session — Week 4</div>
     <ul style="list-style:none;padding:0;margin:0;">
-      <li>• <code>resume/generator.py</code> — tailor_resume → markdown</li>
-      <li>• <code>resume/pdf_export.py</code> — reportlab PDF from markdown</li>
+      <li>• <strong>Verify scraper</strong>: confirm <code>fetch_description=True</code> is set in <code>jobs/scraper.py</code>, restart bot, /fetchnow, check logs for <code>no_desc=0</code></li>
+      <li>• <code>resume/generator.py</code> — orchestrate <code>tailor_resume()</code>, store markdown result</li>
+      <li>• <code>resume/pdf_export.py</code> — reportlab PDF from tailored markdown</li>
       <li>• <code>bot/handlers/job_approval.py</code> — Approve / Edit / Skip buttons wired to resume gen</li>
       <li>• Application record saved to DB on approval</li>
-      <li>• <code>docker-compose.yml</code> for easy deploy</li>
-      <li>• End-to-end test: /fetchnow → approve job → PDF sent to Telegram</li>
+      <li>• <code>docker-compose.yml</code> for easy local deploy</li>
+      <li>• End-to-end test: /fetchnow → job card → approve → PDF delivered to Telegram</li>
     </ul>
   </div>
 </div>
@@ -1272,7 +1281,7 @@ Append ---CHANGES--- with 5 specific edits made and why.
 │
 ├── <span style="color:#67e8f9;">resume/</span>                ← Week 4
 │   ├── <span style="color:#a78bfa;">generator.py</span>       ← Calls AI tailor_resume()
-│   ├── <span style="color:#a78bfa;">pdf_export.py</span>      ← Markdown → PDF (WeasyPrint)
+│   ├── <span style="color:#a78bfa;">pdf_export.py</span>      ← Markdown → PDF (reportlab — pure Python)
 │   └── <span style="color:#67e8f9;">templates/</span>
 │       └── base.md
 │
@@ -1494,7 +1503,7 @@ volumes:
         <div style="font-size:12px;color:var(--muted);font-family:var(--mono);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">Tasks</div>
         <div style="display:flex;flex-direction:column;gap:6px;">
           <label style="display:flex;gap:8px;font-size:13px;cursor:pointer;"><input type="checkbox" style="margin-top:2px;accent-color:#7c3aed;"> resume/generator.py — call HireLoopAI.tailor_resume()</label>
-          <label style="display:flex;gap:8px;font-size:13px;cursor:pointer;"><input type="checkbox" style="margin-top:2px;accent-color:#7c3aed;"> resume/pdf_export.py — Markdown → HTML → PDF via WeasyPrint</label>
+          <label style="display:flex;gap:8px;font-size:13px;cursor:pointer;"><input type="checkbox" style="margin-top:2px;accent-color:#7c3aed;"> resume/pdf_export.py — Markdown → PDF via reportlab (pure Python)</label>
           <label style="display:flex;gap:8px;font-size:13px;cursor:pointer;"><input type="checkbox" style="margin-top:2px;accent-color:#7c3aed;"> resume/templates/base.md — clean default template</label>
           <label style="display:flex;gap:8px;font-size:13px;cursor:pointer;"><input type="checkbox" style="margin-top:2px;accent-color:#7c3aed;"> Cover letter: check job.cover_letter_required FIRST</label>
           <label style="display:flex;gap:8px;font-size:13px;cursor:pointer;"><input type="checkbox" style="margin-top:2px;accent-color:#7c3aed;"> If required → auto-generate cover letter</label>
@@ -1631,7 +1640,7 @@ hireloop/
 │
 ├── resume/
 │   ├── generator.py
-│   ├── pdf_export.py              # WeasyPrint
+│   ├── pdf_export.py              # reportlab — pure Python, no system deps
 │   └── templates/base.md
 │
 ├── tests/
@@ -2062,7 +2071,7 @@ function copyClaudeMd() {
 │
 ├── <span style="color:#fb7185;">resume/</span>                <span style="color:#3a3a55;">← Week 4</span>
 │   ├── <span style="color:#fb7185;">generator.py</span>       <span style="color:#3a3a55;">← calls HireLoopAI.tailor_resume()</span>
-│   ├── <span style="color:#fb7185;">pdf_export.py</span>      <span style="color:#3a3a55;">← Markdown → PDF via WeasyPrint</span>
+│   ├── <span style="color:#fb7185;">pdf_export.py</span>      <span style="color:#3a3a55;">← Markdown → PDF via reportlab (pure Python)</span>
 │   └── <span style="color:#fb7185;">templates/</span>
 │       └── <span style="color:#fb7185;">base.md</span>        <span style="color:#3a3a55;">← default resume template</span>
 │
@@ -2298,7 +2307,7 @@ answers = <span style="color:#67e8f9;">await</span> ai.answer_screening_question
           <div style="font-family:var(--mono);font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">Tasks</div>
           <div style="display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--text2);">
             <div style="display:flex;gap:8px;"><span style="color:#fb7185;flex-shrink:0;">□</span> resume/generator.py → HireLoopAI.tailor_resume()</div>
-            <div style="display:flex;gap:8px;"><span style="color:#fb7185;flex-shrink:0;">□</span> resume/pdf_export.py → Markdown → PDF (WeasyPrint)</div>
+            <div style="display:flex;gap:8px;"><span style="color:#fb7185;flex-shrink:0;">□</span> resume/pdf_export.py → Markdown → PDF (reportlab)</div>
             <div style="display:flex;gap:8px;"><span style="color:#fb7185;flex-shrink:0;">□</span> Cover letter: generate ONLY if JD asked for it</div>
             <div style="display:flex;gap:8px;"><span style="color:#fb7185;flex-shrink:0;">□</span> bot/handlers/job_approval.py — [✅ Approve] [✏️ Edit] [❌ Reject]</div>
             <div style="display:flex;gap:8px;"><span style="color:#fb7185;flex-shrink:0;">□</span> PDF delivery via Telegram bot.send_document()</div>
@@ -2466,7 +2475,7 @@ hireloop/
 │
 ├── resume/                       <span style="color:var(--text3);"># Week 4</span>
 │   ├── generator.py              <span style="color:var(--text3);"># calls HireLoopAI.tailor_resume(), stores result</span>
-│   ├── pdf_export.py             <span style="color:var(--text3);"># Markdown → PDF via WeasyPrint</span>
+│   ├── pdf_export.py             <span style="color:var(--text3);"># Markdown → PDF via reportlab (pure Python)</span>
 │   └── templates/
 │       └── base.md
 │

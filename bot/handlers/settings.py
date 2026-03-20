@@ -188,10 +188,10 @@ async def cmd_skills(update: Update, context: ContextTypes.DEFAULT_TYPE):
         by_status[node.status] = by_status.get(node.status, 0) + 1
 
     labels = {
-        "verified_attested": "&#x2705; Attested",
-        "verified_resume":   "&#x1F4C4; Resume",
-        "partial":           "&#x26A0;&#xFE0F; Partial",
-        "gap":               "&#x274C; Gap",
+        "verified_attested": "✅ Attested",
+        "verified_resume":   "📄 Resume",
+        "partial":           "⚠️ Partial",
+        "gap":               "❌ Gap",
     }
     parts = []
     for status, label in labels.items():

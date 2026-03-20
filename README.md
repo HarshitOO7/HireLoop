@@ -8,7 +8,7 @@
     <img src="https://img.shields.io/badge/telegram-bot-2CA5E0?style=flat-square&logo=telegram&logoColor=white" />
     <img src="https://img.shields.io/badge/AI-multi--provider-8A2BE2?style=flat-square" />
     <img src="https://img.shields.io/badge/database-SQLite%20%7C%20PostgreSQL-003B57?style=flat-square&logo=sqlite&logoColor=white" />
-    <img src="https://img.shields.io/badge/phase-3%20%2F%204-orange?style=flat-square" />
+    <img src="https://img.shields.io/badge/phase-1%20week%203%20done-green?style=flat-square" />
     <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" />
   </p>
 </p>
@@ -43,23 +43,28 @@ Scrape jobs  →  Score fit  →  Verify skills  →  Generate resume  →  You 
 | Tiered AI routing (fast for bulk, quality for resumes) | ✅ Done |
 | In-memory AI response cache (SHA-256 keyed) | ✅ Done |
 | 6-step Telegram onboarding wizard | ✅ Done |
-| Resume parsing (PDF + DOCX) | ✅ Done |
+| Resume parsing (PDF + DOCX, parallel with asyncio.gather) | ✅ Done |
 | Skill graph with confidence levels + evidence | ✅ Done |
 | Skill deduplication ("Drupal" = "Drupal CMS") | ✅ Done |
 | Add/update skills post-onboarding (no wipe) | ✅ Done |
 | Interactive skill verify flow (confirm / add context / remove) | ✅ Done |
 | HTML skill graph report (sent as file, opens in browser) | ✅ Done |
-| Settings, filters, pause/resume | ✅ Done |
+| Settings, filters, pause/resume, /menu keyboard refresh | ✅ Done |
 | Job scraping (JobSpy — Indeed, LinkedIn, Glassdoor, Google) | ✅ Done |
+| Secondary scraper (Adzuna API) | ✅ Done |
+| AI role title expansion (cached 24h, 6–8 variants) | ✅ Done |
+| URL-hash dedup + semantic dedup (title + company) | ✅ Done |
 | URL-paste job ingestion (Jina Reader) | ✅ Done |
 | Fit scoring + job notification cards | ✅ Done |
 | Skill verification dialog (gap skills → evidence → DB) | ✅ Done |
 | APScheduler — daily scrape at 08:00 + 18:00 | ✅ Done |
-| /jobs command + 📋 Pending Jobs keyboard button | ✅ Done |
+| /fetchnow — instant on-demand scrape | ✅ Done |
+| Auto-purge stale jobs after 10 days (keeps applied/approved) | ✅ Done |
 | Resume tailoring + PDF export (reportlab) | 🔜 Week 4 |
 | Cover letter generation (on request only) | 🔜 Week 4 |
 | Application logging | 🔜 Week 4 |
 | Recruiter finder | 🔜 Phase 2 |
+| Embedding-based fit scoring (RAG / semantic similarity) | 🔜 Phase 3 |
 | Auto-apply (Playwright) | 🔜 Phase 3 |
 
 ---
@@ -72,9 +77,11 @@ Scrape jobs  →  Score fit  →  Verify skills  →  Generate resume  →  You 
 │  bot/main.py · onboarding.py · handlers/ · keyboards.py         │
 │                                                                  │
 │  ConversationHandlers:                                           │
-│    /start  → onboarding wizard (6 states)                        │
+│    /start     → onboarding wizard (12 states)                    │
 │    /addskills → add skills without wiping (6 states)             │
-│  CommandHandlers: /skills /settings /filters /pause /help        │
+│  CommandHandlers:                                                 │
+│    /skills /settings /filters /pause /help /menu /fetchnow       │
+│    /deleteskill                                                   │
 └────────────────────────┬────────────────────────────────────────┘
                          │
                          ▼
@@ -84,10 +91,11 @@ Scrape jobs  →  Score fit  →  Verify skills  →  Generate resume  →  You 
 │                                                                  │
 │   FAST provider (Groq / llama-3.3-70b)                          │
 │     parse_resume()  parse_job()  analyze_fit()                   │
+│     expand_role_titles()  ← cached 24h, 6–8 variants            │
 │                                                                  │
 │   QUALITY provider (Anthropic / claude-sonnet-4-6)              │
 │     tailor_resume()  write_cover_letter()                        │
-│     answer_screening_questions()                                 │
+│     answer_screening_questions()  edit_resume()                  │
 │                                                                  │
 │   ai/cache.py — SHA-256 in-memory cache (no repeat AI calls)    │
 │   ai/factory.py — reads .env, builds provider instances          │
@@ -194,6 +202,8 @@ OLLAMA_HOST=http://localhost:11434         # local Ollama instance
 ```
 parse_resume()               →  FAST    (one-time extraction, not quality-critical)
 parse_job()                  →  FAST    (runs on every scraped job, 50+/day)
+expand_role_titles()         →  FAST    (runs once per user, cached 24h in user.filters)
+                                        ↑ "AI Engineer" → ["ML Engineer", "LLM Developer", ...]
 analyze_fit()                →  FAST    (runs per job above salary threshold)
                                         ↑ cached — same resume+job = no repeat call
 
@@ -276,9 +286,11 @@ start       - Onboarding wizard (or re-run to update profile)
 addskills   - Add new skills or upload an updated resume
 skills      - View your skill graph (HTML report)
 settings    - View all preferences
-filters     - View current job filters
+filters     - Edit job filters
 pause       - Pause or resume job hunting
 deleteskill - Remove a skill by name
+fetchnow    - Trigger an immediate job scrape
+menu        - Refresh the keyboard (useful after bot restarts)
 cancel      - Cancel current operation
 help        - Full command list
 ```
@@ -293,8 +305,10 @@ Always visible at the bottom of the chat:
 ├──────────────────┼──────────────────┤
 │  📊 My Skills    │  📋 Pending Jobs  │
 ├──────────────────┼──────────────────┤
-│  ⏸ Pause Agent  │  ⚙️ Settings      │
+│  🔍 Fetch Jobs   │  ⚙️ Settings      │
 └──────────────────┴──────────────────┘
+│        ⏸ Pause Agent                │
+└──────────────────────────────────────┘
 ```
 
 ---
@@ -320,7 +334,13 @@ CONFIRM_SKILLS (per skill)
   └─ [❌ Remove]        → skip this skill
 
 SET_FILTERS
-  └─ Role → Location → Remote pref → Min salary → Blacklist
+  └─ Role titles (comma-separated, e.g. "Software Engineer, AI Engineer")
+  └─ Remote preference (remote / hybrid / on-site / any)
+  └─ Country (sets regional job board)
+  └─ City / Region (or skip for nationwide)
+  └─ Job boards (Indeed, LinkedIn, Glassdoor, Google, ZipRecruiter)
+  └─ Min salary
+  └─ Blacklist companies
 
 SET_FREQUENCY
   └─ [📬 Daily] [⚡ Real-time] [2x/day]
@@ -546,18 +566,23 @@ applications
 - [x] Tiered routing (fast / quality)
 - [x] In-memory cache
 - [x] SQLAlchemy async schema
-- [x] Telegram onboarding wizard
+- [x] Telegram onboarding wizard (12 states)
 - [x] Skill graph (nodes + evidence)
-- [x] Skill deduplication
-- [x] Post-onboarding skill management
-- [x] HTML skill graph report
-- [x] Job scraper (JobSpy)
+- [x] Skill deduplication + normalization
+- [x] Post-onboarding skill management (/addskills)
+- [x] HTML skill graph report (/skills)
+- [x] Job scraper (JobSpy + Adzuna secondary)
+- [x] AI role title expansion (expand_role_titles, cached 24h)
+- [x] URL-hash + semantic (title+company) dedup
 - [x] URL-paste ingestion (Jina Reader)
 - [x] Fit scoring notification cards
 - [x] Skill verification dialog
-- [x] APScheduler daily scrape loop
-- [ ] Resume generator + PDF export
-- [ ] Application logging
+- [x] APScheduler daily scrape loop (08:00 + 18:00)
+- [x] /fetchnow — instant on-demand scrape
+- [x] Auto-purge stale jobs after 10 days
+- [ ] Resume generator + PDF export (reportlab)
+- [ ] Job approval screen (Approve / Edit / Skip)
+- [ ] Application logging to DB
 
 ### Phase 2 — Multi-user + Intelligence
 - [ ] Recruiter finder (3-tier: JD parse → LinkedIn → web search)
@@ -574,6 +599,7 @@ applications
 - [ ] Gmail integration for outcome loop
 - [ ] Web dashboard (Next.js)
 - [ ] Supabase multi-tenant auth
+- [ ] Embedding-based fit scoring (sentence-transformers, cosine similarity) — low priority
 
 ---
 
