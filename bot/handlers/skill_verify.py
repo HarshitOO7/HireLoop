@@ -60,7 +60,7 @@ async def _ask_next_gap(context: ContextTypes.DEFAULT_TYPE, msg) -> int:
     await msg.reply_text(
         f"Gap {idx + 1} of {total}: *{skill}* ({importance})\n\n"
         "Have you used this professionally? One sentence — company, what you built, duration.\n\n"
-        "_Example: Built Kafka pipelines at Acme Corp for 8 months, async order processing_\n\n"
+        "_Example: Managed ICU ward at City Hospital for 18 months_ or _Built APIs at Acme Corp for 8 months_\n\n"
         "Or type `skip` to pass.",
         parse_mode="Markdown",
     )

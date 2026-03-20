@@ -352,7 +352,7 @@ async def add_skill_context_requested(update: Update, context: ContextTypes.DEFA
     await query.edit_message_text(
         f"Tell me about your *{skill['skill_name']}* experience:\n\n"
         "One sentence — company, what you built, how long.\n\n"
-        "Example: _Built Kafka pipelines at Acme Corp for 8 months_",
+        "Example: _Led patient triage at City Hospital for 2 years_ or _Built APIs at Acme for 8 months_",
         parse_mode="Markdown",
     )
     return ADD_CONTEXT

@@ -1,0 +1,218 @@
+2026-03-20 11:03:51,912 [DEBUG   ] asyncio: Using proactor: IocpProactor
+2026-03-20 11:03:51,913 [INFO    ] debug_scraper: ============================================================
+2026-03-20 11:03:51,913 [INFO    ] debug_scraper: HireLoop Scraper Debug
+2026-03-20 11:03:51,914 [INFO    ] debug_scraper: ============================================================
+2026-03-20 11:03:51,914 [INFO    ] debug_scraper: Role:      Software Developer
+2026-03-20 11:03:51,914 [INFO    ] debug_scraper: Location:  any
+2026-03-20 11:03:51,914 [INFO    ] debug_scraper: Country:   Canada
+2026-03-20 11:03:51,914 [INFO    ] debug_scraper: Remote:    any
+2026-03-20 11:03:51,914 [INFO    ] debug_scraper: Sites:     ['indeed']
+2026-03-20 11:03:51,914 [INFO    ] debug_scraper: Results:   50 per term
+2026-03-20 11:03:51,914 [INFO    ] debug_scraper: Hours old: 24
+2026-03-20 11:03:51,915 [INFO    ] debug_scraper: Years exp: < 4
+2026-03-20 11:03:51,915 [INFO    ] debug_scraper: Log file:  W:\HireLoop\scripts\scrape_debug_20260320_110351.txt
+2026-03-20 11:03:51,915 [INFO    ] debug_scraper: Raw dump:  W:\HireLoop\scripts\scrape_raw_20260320_110351.json
+2026-03-20 11:03:51,915 [INFO    ] debug_scraper: ============================================================
+2026-03-20 11:03:51,915 [INFO    ] debug_scraper: Using raw role titles: ['Software Developer']
+2026-03-20 11:03:51,915 [INFO    ] debug_scraper: 
+2026-03-20 11:03:51,915 [INFO    ] debug_scraper: SCRAPING 1 terms...
+2026-03-20 11:03:51,915 [INFO    ] debug_scraper: ------------------------------------------------------------
+2026-03-20 11:03:51,916 [INFO    ] debug_scraper: [1/1] term='Software Developer'
+2026-03-20 11:03:57,444 [INFO    ] debug_scraper:   scraping: 'Software Developer'  location='any'  sites=['indeed']
+2026-03-20 11:03:58,405 [INFO    ] debug_scraper:   → 50 results (0.95s)
+2026-03-20 11:03:58,406 [INFO    ] debug_scraper:   done in 6.50s — got 50 jobs
+2026-03-20 11:03:58,406 [INFO    ] debug_scraper: 
+2026-03-20 11:03:58,406 [INFO    ] debug_scraper: TOTAL RAW: 50 jobs from 1 terms (jobspy + adzuna)
+2026-03-20 11:03:58,406 [INFO    ] debug_scraper: 
+2026-03-20 11:03:58,407 [INFO    ] debug_scraper: ============================================================
+2026-03-20 11:03:58,407 [INFO    ] debug_scraper: ANALYSIS
+2026-03-20 11:03:58,407 [INFO    ] debug_scraper: ============================================================
+2026-03-20 11:03:58,407 [INFO    ] debug_scraper: Total raw jobs:     50
+2026-03-20 11:03:58,407 [INFO    ] debug_scraper:   Has description:  50  (100%)
+2026-03-20 11:03:58,407 [INFO    ] debug_scraper:   No description:   0  ← THESE ARE DROPPED BY FILTER
+2026-03-20 11:03:58,408 [INFO    ] debug_scraper:   No URL:           0
+2026-03-20 11:03:58,408 [INFO    ] debug_scraper:   Has salary info:  0
+2026-03-20 11:03:58,408 [INFO    ] debug_scraper: 
+2026-03-20 11:03:58,408 [INFO    ] debug_scraper: By site:
+2026-03-20 11:03:58,408 [INFO    ] debug_scraper:   indeed               50
+2026-03-20 11:03:58,408 [INFO    ] debug_scraper: 
+2026-03-20 11:03:58,408 [INFO    ] debug_scraper: Duplicate URLs:     0
+2026-03-20 11:03:58,408 [INFO    ] debug_scraper: 
+2026-03-20 11:03:58,409 [INFO    ] debug_scraper: ALL JOBS (50 total):
+2026-03-20 11:03:58,409 [INFO    ] debug_scraper: ------------------------------------------------------------
+2026-03-20 11:03:58,409 [INFO    ] debug_scraper:   1. [indeed    ] Progress OpenEdge Software Developer (Full-Time or Cont | CashierPRO                     | Remote, CA                 ✓ desc
+2026-03-20 11:03:58,409 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=e0a5d79c977654e8
+2026-03-20 11:03:58,409 [INFO    ] debug_scraper:   2. [indeed    ] Staff Machine Learning Developer                        | D-Wave                         | Burnaby, BC, CA            ✓ desc
+2026-03-20 11:03:58,409 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=b8435db0156b31e1
+2026-03-20 11:03:58,409 [INFO    ] debug_scraper:   3. [indeed    ] CNC Machinist Programmer                                | Novy Manufacturing             | Waterloo, ON, CA           ✓ desc
+2026-03-20 11:03:58,409 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=149948fd0f055072
+2026-03-20 11:03:58,410 [INFO    ] debug_scraper:   4. [indeed    ] CNC Mill Programmer                                     | Anvil Machine Ltd.             | Edmonton, AB, CA           ✓ desc
+2026-03-20 11:03:58,410 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=bf6eb8648b2a7fe5
+2026-03-20 11:03:58,410 [INFO    ] debug_scraper:   5. [indeed    ] CNC Programmer/Operator-Afternoon Shift                 | OpenAire                       | Mississauga, ON, CA        ✓ desc
+2026-03-20 11:03:58,410 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=e0a2d0ceede1d1cb
+2026-03-20 11:03:58,410 [INFO    ] debug_scraper:   6. [indeed    ] Software Developer                                      | SGA Tech Solutions             | Winnipeg, MB, CA           ✓ desc
+2026-03-20 11:03:58,410 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=fe6258b932a800b4
+2026-03-20 11:03:58,410 [INFO    ] debug_scraper:   7. [indeed    ] Software Developer Level 2, Towed Systems               | Kraken Robotics                | Remote, CA                 ✓ desc
+2026-03-20 11:03:58,410 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=6e273c608fe30799
+2026-03-20 11:03:58,410 [INFO    ] debug_scraper:   8. [indeed    ] Principal Software Engineer                             | Fleetworthy                    | Remote, CA                 ✓ desc
+2026-03-20 11:03:58,411 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=6d65e8bfd59ff995
+2026-03-20 11:03:58,411 [INFO    ] debug_scraper:   9. [indeed    ] Software Engineer (Early Career to Senior) – Agentic AI | ?                              | Waterloo, ON, CA           ✓ desc
+2026-03-20 11:03:58,411 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=ad05d2cc2f6f3b62
+2026-03-20 11:03:58,411 [INFO    ] debug_scraper:  10. [indeed    ] Backend Engineer                                        | Wordly                         | CA                         ✓ desc
+2026-03-20 11:03:58,411 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=9c86eee1ae1be580
+2026-03-20 11:03:58,411 [INFO    ] debug_scraper:  11. [indeed    ] Senior Software Engineer (Java) - Contract              | Lazer                          | CA                         ✓ desc
+2026-03-20 11:03:58,411 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=e291d861bde47624
+2026-03-20 11:03:58,411 [INFO    ] debug_scraper:  12. [indeed    ] Job Developer                                           | Lifemark Health Group          | Calgary, AB, CA            ✓ desc
+2026-03-20 11:03:58,412 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=a6b4448ee9567ab8
+2026-03-20 11:03:58,412 [INFO    ] debug_scraper:  13. [indeed    ] Job Consultant/Job Developer (26-08-RFH-171)            | NORTHERN COLLEGE OF APPLIED AR | Timmins, ON, CA            ✓ desc
+2026-03-20 11:03:58,412 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=680d6b485e3dd930
+2026-03-20 11:03:58,412 [INFO    ] debug_scraper:  14. [indeed    ] Staff Software Engineer, Security                       | Okta                           | Toronto, ON, CA            ✓ desc
+2026-03-20 11:03:58,412 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=4f7dddc1ade19c3b
+2026-03-20 11:03:58,412 [INFO    ] debug_scraper:  15. [indeed    ] Senior Software Developer - .NET / AWS / Full Stack     | NAVBLUE                        | Waterloo, ON, CA           ✓ desc
+2026-03-20 11:03:58,412 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=8ef59f3c43609f26
+2026-03-20 11:03:58,412 [INFO    ] debug_scraper:  16. [indeed    ] Intermediate Software Developer - .NET / AWS / Full Sta | NAVBLUE                        | Waterloo, ON, CA           ✓ desc
+2026-03-20 11:03:58,412 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=79d71fcb23aa135f
+2026-03-20 11:03:58,412 [INFO    ] debug_scraper:  17. [indeed    ] Manager, Capacity Development, Financing Adaptation     | Federation of Canadian Municip | Ottawa, ON, CA             ✓ desc
+2026-03-20 11:03:58,412 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=5f67d033997fa7a0
+2026-03-20 11:03:58,413 [INFO    ] debug_scraper:  18. [indeed    ] Full Stack Software Developer I                         | Intuit                         | Toronto, ON, CA            ✓ desc
+2026-03-20 11:03:58,413 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=f347a0d426031749
+2026-03-20 11:03:58,413 [INFO    ] debug_scraper:  19. [indeed    ] Senior Frontend Engineer                                | Aircall                        | Madrid, SK, CA             ✓ desc
+2026-03-20 11:03:58,413 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=d5de4e450bd255be
+2026-03-20 11:03:58,413 [INFO    ] debug_scraper:  20. [indeed    ] Coordinator, Career Development Services                | Kwantlen Polytechnic Universit | Surrey, BC, CA             ✓ desc
+2026-03-20 11:03:58,413 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=c7f8d094cff3bb2e
+2026-03-20 11:03:58,413 [INFO    ] debug_scraper:  21. [indeed    ] Senior Software Engineer 2 (Systems)                    | Kabam                          | Vancouver, BC, CA          ✓ desc
+2026-03-20 11:03:58,414 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=c52478c1f64ef12a
+2026-03-20 11:03:58,414 [INFO    ] debug_scraper:  22. [indeed    ] Full Stack Development Lead, GFT                        | RBC                            | Toronto, ON, CA            ✓ desc
+2026-03-20 11:03:58,414 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=3057702b76822f55
+2026-03-20 11:03:58,414 [INFO    ] debug_scraper:  23. [indeed    ] Software Engineer - Emerging Technologies Solutions     | RBC                            | Toronto, ON, CA            ✓ desc
+2026-03-20 11:03:58,414 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=1c69dd657d7dfa67
+2026-03-20 11:03:58,414 [INFO    ] debug_scraper:  24. [indeed    ] Senior Android Developer                                | RBC                            | Toronto, ON, CA            ✓ desc
+2026-03-20 11:03:58,414 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=47e1825279637008
+2026-03-20 11:03:58,415 [INFO    ] debug_scraper:  25. [indeed    ] Sr Salesforce Developer                                 | RBC                            | Toronto, ON, CA            ✓ desc
+2026-03-20 11:03:58,415 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=12b9c52997a6303e
+2026-03-20 11:03:58,415 [INFO    ] debug_scraper:  26. [indeed    ] Senior Manager Product Development - Commercial Receiva | RBC                            | Toronto, ON, CA            ✓ desc
+2026-03-20 11:03:58,415 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=638fecbcf8de83c5
+2026-03-20 11:03:58,415 [INFO    ] debug_scraper:  27. [indeed    ] Manager, Software Engineering                           | Pacific Blue Cross             | Burnaby, BC, CA            ✓ desc
+2026-03-20 11:03:58,415 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=9c47bc1c54d5e507
+2026-03-20 11:03:58,415 [INFO    ] debug_scraper:  28. [indeed    ] Events & Programming Coordinator                        | Malahat SkyWalk                | Malahat, BC, CA            ✓ desc
+2026-03-20 11:03:58,415 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=eedc39fc37b616a2
+2026-03-20 11:03:58,415 [INFO    ] debug_scraper:  29. [indeed    ] back-end Web developer                                  | Phonebox                       | Vancouver, BC, CA          ✓ desc
+2026-03-20 11:03:58,416 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=32866ef9b06710c2
+2026-03-20 11:03:58,416 [INFO    ] debug_scraper:  30. [indeed    ] Lead DevOps Engineer                                    | The Brand Power Company        | Toronto, ON, CA            ✓ desc
+2026-03-20 11:03:58,416 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=4f5cfd55a8024cb7
+2026-03-20 11:03:58,416 [INFO    ] debug_scraper:  31. [indeed    ] Senior Software Engineer (AWS Glue)                     | Sun Life                       | North York, ON, CA         ✓ desc
+2026-03-20 11:03:58,416 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=bf0673ec36a052a4
+2026-03-20 11:03:58,416 [INFO    ] debug_scraper:  32. [indeed    ] Senior Software Engineer (AWS Glue)                     | Sun Life                       | Waterloo, ON, CA           ✓ desc
+2026-03-20 11:03:58,416 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=bd852cca0c52d81f
+2026-03-20 11:03:58,416 [INFO    ] debug_scraper:  33. [indeed    ] Mainframe Developer                                     | Capgemini                      | Toronto, ON, CA            ✓ desc
+2026-03-20 11:03:58,416 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=72924767f9333435
+2026-03-20 11:03:58,416 [INFO    ] debug_scraper:  34. [indeed    ] Java Developer                                          | Citi                           | Mississauga, ON, CA        ✓ desc
+2026-03-20 11:03:58,417 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=2df64d16fe00e8f4
+2026-03-20 11:03:58,417 [INFO    ] debug_scraper:  35. [indeed    ] Senior Software Engineer                                | Citi                           | Mississauga, ON, CA        ✓ desc
+2026-03-20 11:03:58,417 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=0597dbaf7f37bd6b
+2026-03-20 11:03:58,417 [INFO    ] debug_scraper:  36. [indeed    ] Java Lead Engineer                                      | Citi                           | Mississauga, ON, CA        ✓ desc
+2026-03-20 11:03:58,417 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=c153a708827b4cca
+2026-03-20 11:03:58,417 [INFO    ] debug_scraper:  37. [indeed    ] Python Lead Engineer                                    | Citi                           | Mississauga, ON, CA        ✓ desc
+2026-03-20 11:03:58,417 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=020998292dc655ea
+2026-03-20 11:03:58,417 [INFO    ] debug_scraper:  38. [indeed    ] Database Developer, Information Technology (Remote)     | Signal49 Research              | ON, CA                     ✓ desc
+2026-03-20 11:03:58,417 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=7e7017d1a0251302
+2026-03-20 11:03:58,417 [INFO    ] debug_scraper:  39. [indeed    ] Senior Frontend Engineer                                | Minga                          | Vancouver, BC, CA          ✓ desc
+2026-03-20 11:03:58,418 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=5ec339fbc155e98a
+2026-03-20 11:03:58,418 [INFO    ] debug_scraper:  40. [indeed    ] Magento Backend Developer                               | Valtech Group                  | Montréal, QC, CA           ✓ desc
+2026-03-20 11:03:58,418 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=1a6b6bdda2a735f6
+2026-03-20 11:03:58,418 [INFO    ] debug_scraper:  41. [indeed    ] Data Developer - Toronto                                | Mod Op                         | Toronto, ON, CA            ✓ desc
+2026-03-20 11:03:58,418 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=f0e47b3acc653eea
+2026-03-20 11:03:58,418 [INFO    ] debug_scraper:  42. [indeed    ] Ingénieur en machine learning/Machine Learning Engineer | Amazon Web Services            | Montréal, QC, CA           ✓ desc
+2026-03-20 11:03:58,419 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=58e35ee11e78fb42
+2026-03-20 11:03:58,419 [INFO    ] debug_scraper:  43. [indeed    ] Ingénieur en machine learning/Machine Learning Engineer | Amazon Web Services            | Calgary, AB, CA            ✓ desc
+2026-03-20 11:03:58,419 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=6d64b9594f2307ba
+2026-03-20 11:03:58,419 [INFO    ] debug_scraper:  44. [indeed    ] Ingénieur en machine learning/Machine Learning Engineer | Amazon Web Services            | Vancouver, BC, CA          ✓ desc
+2026-03-20 11:03:58,419 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=90d8560208e9b494
+2026-03-20 11:03:58,419 [INFO    ] debug_scraper:  45. [indeed    ] Ingénieur en machine learning/Machine Learning Engineer | Amazon Web Services            | Toronto, ON, CA            ✓ desc
+2026-03-20 11:03:58,419 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=74f5da88869ea29d
+2026-03-20 11:03:58,420 [INFO    ] debug_scraper:  46. [indeed    ] Industrial Automation - Software Development Engineer|  | Husky Injection Molding        | Bolton, ON, CA             ✓ desc
+2026-03-20 11:03:58,420 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=a2ce1d77d23ffa64
+2026-03-20 11:03:58,420 [INFO    ] debug_scraper:  47. [indeed    ] Data Analyst or Cloud Developer|                        | Husky Injection Molding        | Bolton, ON, CA             ✓ desc
+2026-03-20 11:03:58,420 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=a8cc9b7a3b154187
+2026-03-20 11:03:58,420 [INFO    ] debug_scraper:  48. [indeed    ] Architecte senior en sécurité cloud / Senior Cloud Secu | Amazon Web Services            | Montréal, QC, CA           ✓ desc
+2026-03-20 11:03:58,420 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=cf05c65626ddf229
+2026-03-20 11:03:58,420 [INFO    ] debug_scraper:  49. [indeed    ] Architecte senior en sécurité cloud / Senior Cloud Secu | Amazon Web Services            | Ottawa, ON, CA             ✓ desc
+2026-03-20 11:03:58,421 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=44d61b3775c52280
+2026-03-20 11:03:58,421 [INFO    ] debug_scraper:  50. [indeed    ] Software Dev Engineer - II, Amazon FinAuto, AR Tech     | Amazon.com                     | Toronto, ON, CA            ✓ desc
+2026-03-20 11:03:58,421 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=5eae8339d31d3257
+2026-03-20 11:03:58,421 [INFO    ] debug_scraper: ------------------------------------------------------------
+2026-03-20 11:03:58,423 [INFO    ] debug_scraper:   years_of_exp filter: '< 4'
+2026-03-20 11:03:58,425 [DEBUG   ] jobs.filters: [filters] years gate: dropped 'staff machine learning developer' — requires 5 yrs, user max=3
+2026-03-20 11:03:58,425 [DEBUG   ] jobs.filters: [filters] off-topic: dropped 'cnc machinist programmer'
+2026-03-20 11:03:58,425 [DEBUG   ] jobs.filters: [filters] off-topic: dropped 'cnc mill programmer'
+2026-03-20 11:03:58,425 [DEBUG   ] jobs.filters: [filters] off-topic: dropped 'cnc programmer/operator-afternoon shift'
+2026-03-20 11:03:58,427 [DEBUG   ] jobs.filters: [filters] years gate: dropped 'principal software engineer' — requires 5 yrs, user max=3
+2026-03-20 11:03:58,427 [DEBUG   ] jobs.filters: [filters] years gate: dropped 'software engineer (early career to senior) – agentic ai products' — requires 5 yrs, user max=3
+2026-03-20 11:03:58,427 [DEBUG   ] jobs.filters: [filters] off-topic: dropped 'backend engineer'
+2026-03-20 11:03:58,428 [DEBUG   ] jobs.filters: [filters] years gate: dropped 'senior software engineer (java) - contract' — requires 5 yrs, user max=3
+2026-03-20 11:03:58,428 [DEBUG   ] jobs.filters: [filters] years gate: dropped 'staff software engineer, security' — requires 5 yrs, user max=3
+2026-03-20 11:03:58,429 [DEBUG   ] jobs.filters: [filters] years gate: dropped 'senior software developer - .net / aws / full stack' — requires 5 yrs, user max=3
+2026-03-20 11:03:58,429 [DEBUG   ] jobs.filters: [filters] off-topic: dropped 'manager, capacity development, financing adaptation'
+2026-03-20 11:03:58,429 [DEBUG   ] jobs.filters: [filters] off-topic: dropped 'senior frontend engineer'
+2026-03-20 11:03:58,429 [DEBUG   ] jobs.filters: [filters] off-topic: dropped 'coordinator, career development services'
+2026-03-20 11:03:58,430 [DEBUG   ] jobs.filters: [filters] years gate: dropped 'senior software engineer 2 (systems)' — requires 5 yrs, user max=3
+2026-03-20 11:03:58,430 [DEBUG   ] jobs.filters: [filters] off-topic: dropped 'full stack development lead, gft'
+2026-03-20 11:03:58,430 [DEBUG   ] jobs.filters: [filters] years gate: dropped 'senior android developer' — requires 5 yrs, user max=3
+2026-03-20 11:03:58,431 [DEBUG   ] jobs.filters: [filters] years gate: dropped 'sr salesforce developer' — requires 5 yrs, user max=3
+2026-03-20 11:03:58,431 [DEBUG   ] jobs.filters: [filters] years gate: dropped 'senior manager product development - commercial receivables product & erp/accounting software integration' — requires 5 yrs, user max=3
+2026-03-20 11:03:58,431 [DEBUG   ] jobs.filters: [filters] years gate: dropped 'manager, software engineering' — requires 5 yrs, user max=3
+2026-03-20 11:03:58,431 [DEBUG   ] jobs.filters: [filters] off-topic: dropped 'events & programming coordinator'
+2026-03-20 11:03:58,432 [DEBUG   ] jobs.filters: [filters] off-topic: dropped 'lead devops engineer'
+2026-03-20 11:03:58,432 [DEBUG   ] jobs.filters: [filters] years gate: dropped 'senior software engineer (aws glue)' — requires 5 yrs, user max=3
+2026-03-20 11:03:58,433 [DEBUG   ] jobs.filters: [filters] years gate: dropped 'senior software engineer' — requires 5 yrs, user max=3
+2026-03-20 11:03:58,433 [DEBUG   ] jobs.filters: [filters] off-topic: dropped 'java lead engineer'
+2026-03-20 11:03:58,433 [DEBUG   ] jobs.filters: [filters] off-topic: dropped 'python lead engineer'
+2026-03-20 11:03:58,433 [DEBUG   ] jobs.filters: [filters] off-topic: dropped 'senior frontend engineer'
+2026-03-20 11:03:58,434 [DEBUG   ] jobs.filters: [filters] off-topic: dropped 'ingénieur en machine learning/machine learning engineer, proserve shared delivery team - data & ai'
+2026-03-20 11:03:58,435 [DEBUG   ] jobs.filters: [filters] off-topic: dropped 'architecte senior en sécurité cloud / senior cloud security architect, services professionnels aws / aws professional services'
+2026-03-20 11:03:58,435 [INFO    ] jobs.filters: [filters] in=50  out=17 | skipped: no_desc=0  url=0  semantic=5  blacklist=0  non_tech=15  salary=0  years=13
+2026-03-20 11:03:58,435 [INFO    ] debug_scraper: 
+2026-03-20 11:03:58,435 [INFO    ] debug_scraper: AFTER FILTERS: 17 / 50 jobs remain
+2026-03-20 11:03:58,436 [INFO    ] debug_scraper: JOBS THAT PASSED FILTERS:
+2026-03-20 11:03:58,436 [INFO    ] debug_scraper: ------------------------------------------------------------
+2026-03-20 11:03:58,436 [INFO    ] debug_scraper:   1. [indeed    ] Progress OpenEdge Software Developer (Full-Time or Cont | CashierPRO                     | Remote, CA               
+2026-03-20 11:03:58,436 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=e0a5d79c977654e8
+2026-03-20 11:03:58,436 [INFO    ] debug_scraper:   2. [indeed    ] Software Developer                                      | SGA Tech Solutions             | Winnipeg, MB, CA         
+2026-03-20 11:03:58,436 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=fe6258b932a800b4
+2026-03-20 11:03:58,436 [INFO    ] debug_scraper:   3. [indeed    ] Software Developer Level 2, Towed Systems               | Kraken Robotics                | Remote, CA               
+2026-03-20 11:03:58,436 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=6e273c608fe30799
+2026-03-20 11:03:58,437 [INFO    ] debug_scraper:   4. [indeed    ] Job Developer                                           | Lifemark Health Group          | Calgary, AB, CA          
+2026-03-20 11:03:58,437 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=a6b4448ee9567ab8
+2026-03-20 11:03:58,437 [INFO    ] debug_scraper:   5. [indeed    ] Job Consultant/Job Developer (26-08-RFH-171)            | NORTHERN COLLEGE OF APPLIED AR | Timmins, ON, CA          
+2026-03-20 11:03:58,437 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=680d6b485e3dd930
+2026-03-20 11:03:58,437 [INFO    ] debug_scraper:   6. [indeed    ] Intermediate Software Developer - .NET / AWS / Full Sta | NAVBLUE                        | Waterloo, ON, CA         
+2026-03-20 11:03:58,437 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=79d71fcb23aa135f
+2026-03-20 11:03:58,437 [INFO    ] debug_scraper:   7. [indeed    ] Full Stack Software Developer I                         | Intuit                         | Toronto, ON, CA          
+2026-03-20 11:03:58,438 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=f347a0d426031749
+2026-03-20 11:03:58,438 [INFO    ] debug_scraper:   8. [indeed    ] Software Engineer - Emerging Technologies Solutions     | RBC                            | Toronto, ON, CA          
+2026-03-20 11:03:58,438 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=1c69dd657d7dfa67
+2026-03-20 11:03:58,438 [INFO    ] debug_scraper:   9. [indeed    ] back-end Web developer                                  | Phonebox                       | Vancouver, BC, CA        
+2026-03-20 11:03:58,438 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=32866ef9b06710c2
+2026-03-20 11:03:58,438 [INFO    ] debug_scraper:  10. [indeed    ] Mainframe Developer                                     | Capgemini                      | Toronto, ON, CA          
+2026-03-20 11:03:58,438 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=72924767f9333435
+2026-03-20 11:03:58,438 [INFO    ] debug_scraper:  11. [indeed    ] Java Developer                                          | Citi                           | Mississauga, ON, CA      
+2026-03-20 11:03:58,439 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=2df64d16fe00e8f4
+2026-03-20 11:03:58,439 [INFO    ] debug_scraper:  12. [indeed    ] Database Developer, Information Technology (Remote)     | Signal49 Research              | ON, CA                   
+2026-03-20 11:03:58,439 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=7e7017d1a0251302
+2026-03-20 11:03:58,439 [INFO    ] debug_scraper:  13. [indeed    ] Magento Backend Developer                               | Valtech Group                  | Montréal, QC, CA         
+2026-03-20 11:03:58,439 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=1a6b6bdda2a735f6
+2026-03-20 11:03:58,439 [INFO    ] debug_scraper:  14. [indeed    ] Data Developer - Toronto                                | Mod Op                         | Toronto, ON, CA          
+2026-03-20 11:03:58,439 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=f0e47b3acc653eea
+2026-03-20 11:03:58,440 [INFO    ] debug_scraper:  15. [indeed    ] Industrial Automation - Software Development Engineer|  | Husky Injection Molding        | Bolton, ON, CA           
+2026-03-20 11:03:58,440 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=a2ce1d77d23ffa64
+2026-03-20 11:03:58,440 [INFO    ] debug_scraper:  16. [indeed    ] Data Analyst or Cloud Developer|                        | Husky Injection Molding        | Bolton, ON, CA           
+2026-03-20 11:03:58,440 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=a8cc9b7a3b154187
+2026-03-20 11:03:58,440 [INFO    ] debug_scraper:  17. [indeed    ] Software Dev Engineer - II, Amazon FinAuto, AR Tech     | Amazon.com                     | Toronto, ON, CA          
+2026-03-20 11:03:58,440 [INFO    ] debug_scraper:      https://ca.indeed.com/viewjob?jk=5eae8339d31d3257
+2026-03-20 11:03:58,441 [INFO    ] debug_scraper: ------------------------------------------------------------
+2026-03-20 11:03:58,445 [INFO    ] debug_scraper: 
+2026-03-20 11:03:58,445 [INFO    ] debug_scraper: Raw JSON written → W:\HireLoop\scripts\scrape_raw_20260320_110351.json
+2026-03-20 11:03:58,446 [INFO    ] debug_scraper: 
+2026-03-20 11:03:58,446 [INFO    ] debug_scraper: ============================================================
+2026-03-20 11:03:58,446 [INFO    ] debug_scraper: DONE — full log at W:\HireLoop\scripts\scrape_debug_20260320_110351.txt
+2026-03-20 11:03:58,446 [INFO    ] debug_scraper: ============================================================

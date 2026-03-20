@@ -58,12 +58,12 @@ for noisy in ("urllib3", "httpx", "httpcore", "JobSpy:Glassdoor"):
 logger = logging.getLogger("debug_scraper")
 
 # ── CONFIG — edit these defaults ─────────────────────────────────────────────
-DEFAULT_ROLE        = "Software Engineer, AI Engineer, Full Stack Developer"
+DEFAULT_ROLE        = "Software Developer"   # override with --role for any other field
 DEFAULT_LOCATION    = ""          # blank = anywhere
 DEFAULT_COUNTRY     = "Canada"
 DEFAULT_REMOTE      = "any"       # any | remote | onsite
 DEFAULT_SITES       = ["indeed", "google"]
-DEFAULT_RESULTS     = 10          # results per search term
+DEFAULT_RESULTS     = 50          # results per search term — high enough to not miss 24h jobs
 DEFAULT_HOURS_OLD   = 24          # 24 h default; use --hours to override
 MAX_TERMS           = 8           # limit role variants to this many
 DEFAULT_ADZUNA      = True        # set ADZUNA_APP_ID/KEY in .env to enable
@@ -81,8 +81,10 @@ def _parse_args():
     p.add_argument("--results",  default=DEFAULT_RESULTS,  type=int, help="Results per search term")
     p.add_argument("--hours",    default=DEFAULT_HOURS_OLD,type=int, help="Hours old cutoff")
     p.add_argument("--terms",    default=MAX_TERMS,        type=int, help="Max role variants to test")
-    p.add_argument("--no-expand", action="store_true",     help="Skip AI role expansion, use --role as-is")
-    p.add_argument("--no-adzuna", action="store_true",     help="Skip Adzuna API even if key is configured")
+    p.add_argument("--years",      default=None,         help="Years of exp filter e.g. '< 4', '2-5', '3+', 'any'")
+    p.add_argument("--no-expand",  action="store_true", help="Skip AI role expansion, use --role as-is")
+    p.add_argument("--no-adzuna", action="store_true",  help="Skip Adzuna API even if key is configured")
+    p.add_argument("--no-jobspy", action="store_true",  help="Skip JobSpy (Indeed/Google) — test Adzuna only")
     return p.parse_args()
 
 
@@ -204,16 +206,20 @@ def _analyse(all_jobs: list[dict]):
 
 
 # ── after-filter analysis ─────────────────────────────────────────────────────
-def _run_filters(all_jobs: list[dict], args) -> list[dict]:
+def _run_filters(all_jobs: list[dict], args, terms: list[str]) -> list[dict]:
     from jobs.filters import apply_filters
     user_filters = {
-        "role":       args.role,
-        "location":   args.location,
-        "remote":     args.remote,
-        "min_salary": 0,
-        "blacklist":  [],
+        "role":         args.role,
+        "location":     args.location,
+        "remote":       args.remote,
+        "min_salary":   0,
+        "blacklist":    [],
+        "years_of_exp": args.years,
     }
-    filtered = apply_filters(all_jobs, user_filters, seen_hashes=set(), seen_keys=set())
+    if args.years:
+        logger.info("  years_of_exp filter: %r", args.years)
+    filtered = apply_filters(all_jobs, user_filters, seen_hashes=set(), seen_keys=set(),
+                             search_terms=terms)
     logger.info("")
     logger.info("AFTER FILTERS: %d / %d jobs remain", len(filtered), len(all_jobs))
     if filtered:
@@ -247,6 +253,7 @@ async def main():
     logger.info("Sites:     %s", args.sites)
     logger.info("Results:   %d per term", args.results)
     logger.info("Hours old: %d", args.hours)
+    logger.info("Years exp: %s", args.years or "any (no filter)")
     logger.info("Log file:  %s", LOG_FILE)
     logger.info("Raw dump:  %s", RAW_DUMP)
     logger.info("=" * 60)
@@ -269,12 +276,15 @@ async def main():
     loop = asyncio.get_event_loop()
     all_jobs: list[dict] = []
 
-    for i, term in enumerate(terms, 1):
-        logger.info("[%d/%d] term=%r", i, len(terms), term)
-        t0 = time.monotonic()
-        jobs = await loop.run_in_executor(None, _scrape_term, term, args)
-        logger.info("  done in %.2fs — got %d jobs", time.monotonic() - t0, len(jobs))
-        all_jobs.extend(jobs)
+    if args.no_jobspy:
+        logger.info("(JobSpy skipped — --no-jobspy flag set)")
+    else:
+        for i, term in enumerate(terms, 1):
+            logger.info("[%d/%d] term=%r", i, len(terms), term)
+            t0 = time.monotonic()
+            jobs = await loop.run_in_executor(None, _scrape_term, term, args)
+            logger.info("  done in %.2fs — got %d jobs", time.monotonic() - t0, len(jobs))
+            all_jobs.extend(jobs)
 
     # ── Adzuna (optional free API) ────────────────────────────────────────────
     adzuna_jobs: list[dict] = []
@@ -319,7 +329,7 @@ async def main():
 
     # Step 4: apply filters
     if all_jobs:
-        _run_filters(all_jobs, args)
+        _run_filters(all_jobs, args, terms)
 
     # Step 5: dump raw JSON
     try:

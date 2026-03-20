@@ -1,5 +1,5 @@
 """
-6-state onboarding wizard triggered by /start.
+Onboarding wizard triggered by /start.
 
 States:
   WELCOME              → "Let's go" button
@@ -11,6 +11,7 @@ States:
   SET_FILTERS_REMOTE   → button choice
   SET_FILTERS_SALARY   → text (number) or skip
   SET_FILTERS_BLACKLIST→ text or skip
+  SET_YEARS_EXP        → button preset or custom text (e.g. "< 4", "2-5", "3+", "any")
   SET_FREQUENCY        → button choice
   SET_FIT_SCORE        → button choice → save to DB → DONE
 """
@@ -46,6 +47,7 @@ from bot.keyboards import (
     skip_keyboard,
     skill_confirm_keyboard,
     welcome_keyboard,
+    years_exp_keyboard,
 )
 from db.models import SkillEvidence, SkillNode, User
 from db.session import AsyncSessionLocal
@@ -65,10 +67,11 @@ logger = logging.getLogger(__name__)
     SET_FILTERS_SITES,
     SET_FILTERS_SALARY,
     SET_FILTERS_BLACKLIST,
+    SET_YEARS_EXP,
     SET_FREQUENCY,
     SET_FIT_SCORE,
     RETURNING_USER,
-) = range(14)
+) = range(15)
 
 
 # ── Skill normalization ─────────────────────────────────────────────────────
@@ -202,8 +205,8 @@ async def _ask_role(msg) -> int:
         "What job title(s) are you targeting?\n\n"
         "Type one or more *job titles* separated by commas — these become your search keywords, "
         "so keep them short and specific.\n\n"
-        "✅ `Software Engineer, AI Engineer, Full Stack Developer`\n"
-        "❌ `I am looking for software roles in AI...`",
+        "✅ `Software Engineer`  ✅ `Registered Nurse`  ✅ `Project Manager, Business Analyst`\n"
+        "❌ `I am looking for roles in healthcare...`",
         parse_mode="Markdown",
     )
     return SET_FILTERS_ROLE
@@ -461,7 +464,7 @@ async def skill_context_requested(update: Update, context: ContextTypes.DEFAULT_
     await query.edit_message_text(
         f"Tell me about your *{skill['skill_name']}* experience:\n\n"
         "One sentence — company, what you built, how long.\n\n"
-        "Example: _Built Kafka pipelines at Acme Corp for 8 months, async order processing_",
+        "Example: _Led patient triage at City Hospital for 2 years_ or _Built backend APIs at Acme for 8 months_",
         parse_mode="Markdown",
     )
     return CONFIRM_SKILL_CONTEXT
@@ -661,8 +664,7 @@ async def set_filters_blacklist(update: Update, context: ContextTypes.DEFAULT_TY
     raw = update.message.text.strip()
     blacklist = [x.strip() for x in raw.split(",") if x.strip()]
     context.user_data["filters"]["blacklist"] = blacklist
-    await update.message.reply_text("How often should I notify you?", reply_markup=frequency_keyboard())
-    return SET_FREQUENCY
+    return await _ask_years_exp(update.message)
 
 
 async def skip_blacklist(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -670,7 +672,65 @@ async def skip_blacklist(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await query.answer()
     context.user_data.setdefault("filters", {})["blacklist"] = []
     await query.edit_message_text("Blacklist: none")
+    return await _ask_years_exp(query.message)
+
+
+async def _ask_years_exp(msg) -> int:
+    await msg.reply_text(
+        "How many years of experience do you have?\n\n"
+        "Pick a preset or type your own range.\n\n"
+        "Accepted formats:\n"
+        "  • `< 4`  — less than 4 years\n"
+        "  • `2-5`  — between 2 and 5 years\n"
+        "  • `3+`   — 3 or more years\n"
+        "  • `any`  — no filter\n\n"
+        "Jobs that clearly require more years than your range will be filtered out.",
+        parse_mode="Markdown",
+        reply_markup=years_exp_keyboard(),
+    )
+    return SET_YEARS_EXP
+
+
+# ── State: SET_YEARS_EXP ────────────────────────────────────────────────────
+
+_YEARS_PRESET_MAP = {
+    "yrs_lt2":   "< 2",
+    "yrs_lt4":   "< 4",
+    "yrs_2to5":  "2-5",
+    "yrs_5plus": "5+",
+    "yrs_any":   "any",
+}
+
+_YEARS_VALID_RE = re.compile(
+    r"^(?:any|none|<\s*\d+|<=\s*\d+|\d+\s*[-–to]+\s*\d+|\d+\s*\+)$",
+    re.IGNORECASE,
+)
+
+
+async def set_years_exp_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    value = _YEARS_PRESET_MAP.get(query.data, "any")
+    context.user_data.setdefault("filters", {})["years_of_exp"] = value
+    await query.edit_message_text(f"Years of experience: {value}")
     await query.message.reply_text("How often should I notify you?", reply_markup=frequency_keyboard())
+    return SET_FREQUENCY
+
+
+async def set_years_exp_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    raw = update.message.text.strip()
+    if not _YEARS_VALID_RE.match(raw):
+        await update.message.reply_text(
+            "That format isn't recognised. Please use one of:\n\n"
+            "  `< 4`  `2-5`  `3+`  `any`\n\n"
+            "Or pick a preset below.",
+            parse_mode="Markdown",
+            reply_markup=years_exp_keyboard(),
+        )
+        return SET_YEARS_EXP
+    context.user_data.setdefault("filters", {})["years_of_exp"] = raw.lower().strip()
+    await update.message.reply_text(f"Years of experience: {raw}")
+    await update.message.reply_text("How often should I notify you?", reply_markup=frequency_keyboard())
     return SET_FREQUENCY
 
 
@@ -722,9 +782,10 @@ async def set_fit_score(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     await query.message.reply_text(
         f"All set! Here's your profile summary:\n\n"
         f"Role: {filters.get('role', 'any')}\n"
-        f"Location: {filters.get('location', 'any')}\n"
+        f"Location: {', '.join(filters.get('locations') or []) or 'any'}\n"
         f"Remote: {filters.get('remote', 'any')}\n"
         f"Min salary: {filters.get('min_salary', 0) or 'none'}\n"
+        f"Experience: {filters.get('years_of_exp', 'any')}\n"
         f"Skills in graph: {skill_count}\n"
         f"Min fit score: {score}%\n\n"
         "I'll start finding jobs for you. Use the keyboard below to manage your agent.",
@@ -790,6 +851,10 @@ def build_onboarding_handler() -> ConversationHandler:
             SET_FILTERS_BLACKLIST: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, set_filters_blacklist),
                 CallbackQueryHandler(skip_blacklist, pattern="skip_blacklist"),
+            ],
+            SET_YEARS_EXP: [
+                CallbackQueryHandler(set_years_exp_button, pattern=r"^yrs_"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, set_years_exp_text),
             ],
             SET_FREQUENCY: [
                 CallbackQueryHandler(set_frequency, pattern=r"^freq_"),

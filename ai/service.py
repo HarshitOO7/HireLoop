@@ -60,7 +60,7 @@ Return this exact JSON structure:
   "matched_skills": ["skill_name"],
   "missing_required": [{{"skill": "...", "importance": "required|preferred|nice"}}],
   "requires_cover_letter": <true|false>,
-  "best_resume_variant": "backend|lead|fullstack|general",
+  "best_resume_variant": "<one of the variant_tags listed above>",
   "gap_summary": "2 sentence honest assessment",
   "action": "apply|consider|skip",
   "verify_questions": ["Have you used X in production? Where?"],
@@ -116,7 +116,7 @@ Return this exact JSON structure:
       "last_used_year": <integer>
     }}
   ],
-  "variant_tags": ["backend", "fullstack", "lead"]
+  "variant_tags": ["general", "specialization_a", "specialization_b"]
 }}"""
 
 _TAILOR_SYSTEM = """You are an expert resume writer. Tailor resumes truthfully using only verified evidence.

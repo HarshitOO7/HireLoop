@@ -127,7 +127,10 @@ async def _process_user(user: User, bot, ai) -> int:
             seen_hashes, seen_keys = await _get_seen(user.id, session)
             profile = await _get_user_profile(user.id, session)
 
-    filtered = apply_filters(raw_jobs, user.filters or {}, seen_hashes, seen_keys)
+    filtered = apply_filters(
+        raw_jobs, user.filters or {}, seen_hashes, seen_keys,
+        search_terms=role_variants or None,
+    )
     if not filtered:
         logger.info("[scheduler] no new jobs after filtering for user=%s", user.telegram_id)
         return 0

@@ -76,6 +76,21 @@ def sites_keyboard(selected: list[str]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
+def years_exp_keyboard() -> InlineKeyboardMarkup:
+    """Quick-pick presets for years of experience. User can also type a custom range."""
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("< 2 yrs  (new grad)", callback_data="yrs_lt2"),
+            InlineKeyboardButton("< 4 yrs  (junior)",   callback_data="yrs_lt4"),
+        ],
+        [
+            InlineKeyboardButton("2–5 yrs  (mid)",       callback_data="yrs_2to5"),
+            InlineKeyboardButton("5+ yrs   (senior)",    callback_data="yrs_5plus"),
+        ],
+        [InlineKeyboardButton("⏭ Any (no filter)",       callback_data="yrs_any")],
+    ])
+
+
 def frequency_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [

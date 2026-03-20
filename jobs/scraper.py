@@ -79,7 +79,7 @@ async def scrape_for_user(user, role_variants: list[str] | None = None) -> list[
         from jobspy import scrape_jobs
 
         all_dfs = []
-        per_variant = max(5, 25 // len(search_terms))
+        per_variant = 50  # fetch up to 50 per (term × location) — dedup handles overlap
 
         for term in search_terms:
             for loc in search_locations:
@@ -116,15 +116,13 @@ async def scrape_for_user(user, role_variants: list[str] | None = None) -> list[
     loop = asyncio.get_event_loop()
     adzuna_country  = (country[:2].lower() if len(country) >= 2 else "ca")
     first_location  = locations[0] if locations else ""
-    per_term_budget = max(5, 25 // len(search_terms))
-
     jobspy_future = loop.run_in_executor(None, _sync_scrape)
     adzuna_coro   = scrape_adzuna(
         search_terms=search_terms,
         location=first_location,
         country=adzuna_country,
         hours_old=hours_old,
-        results_per_term=per_term_budget,
+        results_per_term=50,
     )
 
     results = await asyncio.gather(jobspy_future, adzuna_coro, return_exceptions=True)
