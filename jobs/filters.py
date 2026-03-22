@@ -222,7 +222,7 @@ def apply_filters(
     search_terms: list[str] | None = None,
 ) -> list[dict]:
     """
-    Filter raw JobSpy / Adzuna results. Returns filtered list with 'url_hash' added.
+    Filter raw JobSpy results. Returns filtered list with 'url_hash' added.
 
     Dedup order (cheapest first — AI is only called after all these pass):
       1. No description → skip
@@ -234,7 +234,7 @@ def apply_filters(
       6. Years of experience → skip if job clearly requires more than user has
 
     Args:
-        raw_jobs:     List of dicts from jobspy/adzuna
+        raw_jobs:     List of dicts from jobspy
         user_filters: User.filters JSON — role, location, remote, min_salary,
                       blacklist, years_of_exp
         seen_hashes:  Set of url_hash values already in DB for this user

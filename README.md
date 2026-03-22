@@ -51,7 +51,6 @@ Scrape jobs  →  Score fit  →  Verify skills  →  Generate resume  →  You 
 | HTML skill graph report (sent as file, opens in browser) | ✅ Done |
 | Settings, filters, pause/resume, /menu keyboard refresh | ✅ Done |
 | Job scraping (JobSpy — Indeed, LinkedIn, Glassdoor, Google) | ✅ Done |
-| Secondary scraper (Adzuna API) | ✅ Done |
 | AI role title expansion (cached 24h, 6–8 variants) | ✅ Done |
 | URL-hash dedup + semantic dedup (title + company) | ✅ Done |
 | URL-paste job ingestion (Jina Reader) | ✅ Done |
@@ -571,7 +570,7 @@ applications
 - [x] Skill deduplication + normalization
 - [x] Post-onboarding skill management (/addskills)
 - [x] HTML skill graph report (/skills)
-- [x] Job scraper (JobSpy + Adzuna secondary)
+- [x] Job scraper (JobSpy — Indeed, LinkedIn, Glassdoor, Google)
 - [x] AI role title expansion (expand_role_titles, cached 24h)
 - [x] URL-hash + semantic (title+company) dedup
 - [x] URL-paste ingestion (Jina Reader)

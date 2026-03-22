@@ -66,7 +66,6 @@ DEFAULT_SITES       = ["indeed", "google"]
 DEFAULT_RESULTS     = 50          # results per search term — high enough to not miss 24h jobs
 DEFAULT_HOURS_OLD   = 24          # 24 h default; use --hours to override
 MAX_TERMS           = 8           # limit role variants to this many
-DEFAULT_ADZUNA      = True        # set ADZUNA_APP_ID/KEY in .env to enable
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
@@ -83,8 +82,7 @@ def _parse_args():
     p.add_argument("--terms",    default=MAX_TERMS,        type=int, help="Max role variants to test")
     p.add_argument("--years",      default=None,         help="Years of exp filter e.g. '< 4', '2-5', '3+', 'any'")
     p.add_argument("--no-expand",  action="store_true", help="Skip AI role expansion, use --role as-is")
-    p.add_argument("--no-adzuna", action="store_true",  help="Skip Adzuna API even if key is configured")
-    p.add_argument("--no-jobspy", action="store_true",  help="Skip JobSpy (Indeed/Google) — test Adzuna only")
+    p.add_argument("--no-jobspy", action="store_true",  help="Skip JobSpy (dry run / filter test only)")
     return p.parse_args()
 
 
@@ -286,35 +284,8 @@ async def main():
             logger.info("  done in %.2fs — got %d jobs", time.monotonic() - t0, len(jobs))
             all_jobs.extend(jobs)
 
-    # ── Adzuna (optional free API) ────────────────────────────────────────────
-    adzuna_jobs: list[dict] = []
-    if not args.no_adzuna:
-        import os as _os
-        if _os.getenv("ADZUNA_APP_ID"):
-            logger.info("")
-            logger.info("ADZUNA API scrape (%d terms)...", len(terms))
-            logger.info("-" * 60)
-            try:
-                from jobs.adzuna_scraper import scrape_adzuna
-                country_code = (args.country[:2].lower() if len(args.country) >= 2 else "ca")
-                t0 = time.monotonic()
-                adzuna_jobs = await scrape_adzuna(
-                    search_terms=terms,
-                    location=args.location,
-                    country=country_code,
-                    hours_old=args.hours,
-                    results_per_term=args.results,
-                )
-                logger.info("  Adzuna done in %.2fs — got %d jobs", time.monotonic() - t0, len(adzuna_jobs))
-            except Exception as e:
-                logger.error("  Adzuna failed: %s", e)
-        else:
-            logger.info("(Adzuna skipped — ADZUNA_APP_ID not set in .env)")
-
-    all_jobs.extend(adzuna_jobs)
-
     logger.info("")
-    logger.info("TOTAL RAW: %d jobs from %d terms (jobspy + adzuna)", len(all_jobs), len(terms))
+    logger.info("TOTAL RAW: %d jobs from %d terms", len(all_jobs), len(terms))
 
     # Step 3: analyse raw results
     if all_jobs:

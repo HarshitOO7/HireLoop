@@ -11,11 +11,6 @@ Role variants: if role_variants is passed (AI-expanded title list), each variant
 is searched separately and results are merged. Semantic dedup collapses cross-board
 duplicates before any AI calls.
 
-Secondary sources:
-  Adzuna API (free, set ADZUNA_APP_ID + ADZUNA_APP_KEY in .env) runs in parallel
-  and its results are merged before filtering. Adds Canada/global coverage + more
-  job descriptions.
-
 hours_old is derived from user.notify_freq so we never show stale duplicates:
   twice_daily → 12 h
   daily       → 24 h  (default)
@@ -44,7 +39,6 @@ async def scrape_for_user(user, role_variants: list[str] | None = None) -> list[
 
     role_variants: AI-expanded title list (e.g. ["Software Engineer", "SWE", "Backend Dev"]).
                    Falls back to user.filters["role"] if not provided.
-    Returns merged job dicts from JobSpy + Adzuna (if configured).
     """
     f = user.filters or {}
     role      = (f.get("role") or "").strip()
@@ -110,43 +104,20 @@ async def scrape_for_user(user, role_variants: list[str] | None = None) -> list[
             return None
         return pd.concat(all_dfs, ignore_index=True)
 
-    # ── Run JobSpy + Adzuna concurrently ─────────────────────────────────────
-    from jobs.adzuna_scraper import scrape_adzuna
-
+    # ── Run JobSpy in thread executor ────────────────────────────────────────
     loop = asyncio.get_event_loop()
-    adzuna_country  = (country[:2].lower() if len(country) >= 2 else "ca")
-    first_location  = locations[0] if locations else ""
-    jobspy_future = loop.run_in_executor(None, _sync_scrape)
-    adzuna_coro   = scrape_adzuna(
-        search_terms=search_terms,
-        location=first_location,
-        country=adzuna_country,
-        hours_old=hours_old,
-        results_per_term=50,
-    )
+    df_result = await loop.run_in_executor(None, _sync_scrape)
 
-    results = await asyncio.gather(jobspy_future, adzuna_coro, return_exceptions=True)
-    df_result, adzuna_jobs = results[0], results[1]
-
-    if isinstance(df_result, Exception):
-        logger.error("[scraper] jobspy raised: %s", df_result)
-        df_result = None
-    if isinstance(adzuna_jobs, Exception):
-        logger.error("[scraper] adzuna raised: %s", adzuna_jobs)
-        adzuna_jobs = []
-
-    jobspy_records: list[dict] = []
+    records: list[dict] = []
     if df_result is not None:
         try:
             if not df_result.empty:
-                jobspy_records = df_result.fillna("").to_dict("records")
+                records = df_result.fillna("").to_dict("records")
         except Exception:
             pass
 
-    all_records = jobspy_records + list(adzuna_jobs or [])
     logger.info(
-        "[scraper] total %d raw jobs (jobspy=%d  adzuna=%d) — %d term(s) × %d location(s)",
-        len(all_records), len(jobspy_records), len(adzuna_jobs or []),
-        len(search_terms), len(search_locations),
+        "[scraper] got %d raw jobs — %d term(s) × %d location(s)",
+        len(records), len(search_terms), len(search_locations),
     )
-    return all_records
+    return records
