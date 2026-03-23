@@ -62,7 +62,7 @@ DEFAULT_ROLE        = "Software Developer"   # override with --role for any othe
 DEFAULT_LOCATION    = ""          # blank = anywhere
 DEFAULT_COUNTRY     = "Canada"
 DEFAULT_REMOTE      = "any"       # any | remote | onsite
-DEFAULT_SITES       = ["indeed", "google"]
+DEFAULT_SITES       = ["indeed", "linkedin", "glassdoor", "google"]
 DEFAULT_RESULTS     = 50          # results per search term — high enough to not miss 24h jobs
 DEFAULT_HOURS_OLD   = 24          # 24 h default; use --hours to override
 MAX_TERMS           = 8           # limit role variants to this many
