@@ -127,9 +127,13 @@ async def _process_user(user: User, bot, ai) -> int:
             seen_hashes, seen_keys = await _get_seen(user.id, session)
             profile = await _get_user_profile(user.id, session)
 
+    from jobs.scraper import _hours_for_freq
+    hours_old = _hours_for_freq(getattr(user, "notify_freq", None))
+
     filtered = apply_filters(
         raw_jobs, user.filters or {}, seen_hashes, seen_keys,
         search_terms=role_variants or None,
+        hours_old=hours_old,
     )
     if not filtered:
         logger.info("[scheduler] no new jobs after filtering for user=%s", user.telegram_id)

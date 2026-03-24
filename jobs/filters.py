@@ -13,6 +13,7 @@ Filters applied (in order):
 import hashlib
 import logging
 import re
+from datetime import datetime, timedelta, date
 
 logger = logging.getLogger(__name__)
 
@@ -212,6 +213,26 @@ def _parse_user_max_years(years_str: str | None) -> int | None:
     return None
 
 
+def _parse_date_posted(value) -> datetime | None:
+    """
+    Parse a date_posted value from JobSpy into a datetime.
+    Handles datetime, date, and common string formats. Returns None if unparseable.
+    """
+    if not value or value == "":
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, date):
+        return datetime(value.year, value.month, value.day)
+    if isinstance(value, str):
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(value[:19], fmt)
+            except ValueError:
+                continue
+    return None
+
+
 # ── Main filter entry point ───────────────────────────────────────────────────
 
 def apply_filters(
@@ -220,11 +241,13 @@ def apply_filters(
     seen_hashes: set[str],
     seen_keys: set[tuple] | None = None,
     search_terms: list[str] | None = None,
+    hours_old: int | None = None,
 ) -> list[dict]:
     """
     Filter raw JobSpy results. Returns filtered list with 'url_hash' added.
 
     Dedup order (cheapest first — AI is only called after all these pass):
+      0. Date cutoff → skip if date_posted is older than hours_old
       1. No description → skip
       2. URL hash match → skip (exact same URL seen before)
       3. Semantic match (title+company) → skip (same job on another board)
@@ -242,6 +265,8 @@ def apply_filters(
         search_terms: All role titles sent to the scraper (base role + AI variants).
                       Used to build a relevance token set — works for any role/industry.
                       If None, falls back to user_filters["role"]; if still empty, skip check.
+        hours_old:    Drop jobs whose date_posted is older than this many hours.
+                      If None, date check is skipped (job boards are trusted to filter by age).
     """
     blacklist  = [b.lower().strip() for b in (user_filters.get("blacklist") or []) if b]
     min_salary = int(user_filters.get("min_salary") or 0)
@@ -254,11 +279,22 @@ def apply_filters(
     _all_terms = list(search_terms or []) or ([_base_role] if _base_role else [])
     _relevance_tokens = _build_relevance_tokens(_all_terms)
 
+    cutoff = datetime.now() - timedelta(hours=hours_old) if hours_old else None
+
     out = []
     skipped_nodesc = skipped_seen = skipped_semantic = 0
     skipped_blacklist = skipped_salary = skipped_years = skipped_irrelevant = 0
+    skipped_stale = 0
 
     for job in raw_jobs:
+        # 0. Date cutoff — drop stale jobs the board failed to filter
+        if cutoff:
+            posted = _parse_date_posted(job.get("date_posted"))
+            if posted and posted < cutoff:
+                skipped_stale += 1
+                logger.debug("[filters] stale: dropped %r (posted %s)", job.get("title"), posted.date())
+                continue
+
         # 1. Must have a description
         desc = (job.get("description") or "").strip()
         if not desc:
@@ -324,10 +360,10 @@ def apply_filters(
         out.append(job)
 
     logger.info(
-        "[filters] in=%d  out=%d | skipped: no_desc=%d  url=%d  semantic=%d  "
-        "blacklist=%d  non_tech=%d  salary=%d  years=%d",
+        "[filters] in=%d  out=%d | skipped: stale=%d  no_desc=%d  url=%d  semantic=%d  "
+        "blacklist=%d  irrelevant=%d  salary=%d  years=%d",
         len(raw_jobs), len(out),
-        skipped_nodesc, skipped_seen, skipped_semantic,
+        skipped_stale, skipped_nodesc, skipped_seen, skipped_semantic,
         skipped_blacklist, skipped_irrelevant, skipped_salary, skipped_years,
     )
     return out

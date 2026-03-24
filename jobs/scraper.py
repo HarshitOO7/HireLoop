@@ -81,6 +81,7 @@ async def scrape_for_user(user, role_variants: list[str] | None = None) -> list[
                     results_wanted=per_variant,
                     hours_old=hours_old,
                     fetch_description=True,
+                    linkedin_fetch_description=True,
                 )
                 if loc:
                     kwargs["location"] = loc

@@ -111,6 +111,7 @@ def _scrape_term(term: str, args) -> list[dict]:
         results_wanted= args.results,
         hours_old     = args.hours,
         fetch_description=True,
+        linkedin_fetch_description=True,
     )
     if args.location:
         kwargs["location"] = args.location
@@ -217,7 +218,7 @@ def _run_filters(all_jobs: list[dict], args, terms: list[str]) -> list[dict]:
     if args.years:
         logger.info("  years_of_exp filter: %r", args.years)
     filtered = apply_filters(all_jobs, user_filters, seen_hashes=set(), seen_keys=set(),
-                             search_terms=terms)
+                             search_terms=terms, hours_old=args.hours)
     logger.info("")
     logger.info("AFTER FILTERS: %d / %d jobs remain", len(filtered), len(all_jobs))
     if filtered:
