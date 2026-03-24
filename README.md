@@ -50,7 +50,7 @@ Scrape jobs  →  Score fit  →  Verify skills  →  Generate resume  →  You 
 | Interactive skill verify flow (confirm / add context / remove) | ✅ Done |
 | HTML skill graph report (sent as file, opens in browser) | ✅ Done |
 | Settings, filters, pause/resume, /menu keyboard refresh | ✅ Done |
-| Job scraping (JobSpy — Indeed, LinkedIn, Glassdoor, Google) | ✅ Done |
+| Job scraping (JobSpy — Indeed, LinkedIn, Glassdoor, Google) | 🧪 Testing |
 | AI role title expansion (cached 24h, 6–8 variants) | ✅ Done |
 | URL-hash dedup + semantic dedup (title + company) | ✅ Done |
 | URL-paste job ingestion (Jina Reader) | ✅ Done |
@@ -59,7 +59,9 @@ Scrape jobs  →  Score fit  →  Verify skills  →  Generate resume  →  You 
 | APScheduler — daily scrape at 08:00 + 18:00 | ✅ Done |
 | /fetchnow — instant on-demand scrape | ✅ Done |
 | Auto-purge stale jobs after 10 days (keeps applied/approved) | ✅ Done |
-| Resume tailoring + PDF export (reportlab) | 🔜 Week 4 |
+| PDF export (reportlab) — resume/pdf_export.py | ✅ Done |
+| Resume tailoring — resume/generator.py | 🔜 Week 4 |
+| Job approval screen (Approve / Edit / Skip) | 🔜 Week 4 |
 | Cover letter generation (on request only) | 🔜 Week 4 |
 | Application logging | 🔜 Week 4 |
 | Recruiter finder | 🔜 Phase 2 |
@@ -570,7 +572,7 @@ applications
 - [x] Skill deduplication + normalization
 - [x] Post-onboarding skill management (/addskills)
 - [x] HTML skill graph report (/skills)
-- [x] Job scraper (JobSpy — Indeed, LinkedIn, Glassdoor, Google)
+- [~] Job scraper (JobSpy — Indeed, LinkedIn, Glassdoor, Google) — testing in progress
 - [x] AI role title expansion (expand_role_titles, cached 24h)
 - [x] URL-hash + semantic (title+company) dedup
 - [x] URL-paste ingestion (Jina Reader)
@@ -579,7 +581,8 @@ applications
 - [x] APScheduler daily scrape loop (08:00 + 18:00)
 - [x] /fetchnow — instant on-demand scrape
 - [x] Auto-purge stale jobs after 10 days
-- [ ] Resume generator + PDF export (reportlab)
+- [x] PDF export (reportlab) — resume/pdf_export.py
+- [ ] Resume generator — resume/generator.py (AI tailoring → markdown)
 - [ ] Job approval screen (Approve / Edit / Skip)
 - [ ] Application logging to DB
 
