@@ -59,9 +59,14 @@ Scrape jobs  →  Score fit  →  Verify skills  →  Generate resume  →  You 
 | APScheduler — daily scrape at 08:00 + 18:00 | ✅ Done |
 | /fetchnow — instant on-demand scrape | ✅ Done |
 | Auto-purge stale jobs after 10 days (keeps applied/approved) | ✅ Done |
-| PDF export (reportlab) — resume/pdf_export.py | ✅ Done |
+| Resume stored as Markdown in DB (render on-demand) | 🔜 Week 4 |
 | Resume tailoring — resume/generator.py | 🔜 Week 4 |
-| Job approval screen (Approve / Edit / Skip) | 🔜 Week 4 |
+| Word (.docx) export via python-docx (primary, ATS-controlled) | 🔜 Week 4 |
+| PDF export on-request via reportlab (resume/pdf_export.py ✅) | 🔜 Week 4 |
+| ATS-safe output (single-col, no tables/boxes, standard headings) | 🔜 Week 4 |
+| Smart resume section order (inferred from profile, zero AI tokens) | 🔜 Week 4 |
+| Job scraper summary card before first job card | 🔜 Week 4 |
+| Job approval screen — [📄 Word] [📋 PDF] [Both] [Skip] | 🔜 Week 4 |
 | Cover letter generation (on request only) | 🔜 Week 4 |
 | Application logging | 🔜 Week 4 |
 | Recruiter finder | 🔜 Phase 2 |
@@ -427,6 +432,78 @@ After confirming skills → fit score recalculated → resume generation begins.
 
 ---
 
+## Resume Generation + Format Delivery
+
+### Storage Strategy
+
+The tailored resume is stored as **Markdown text** in the DB (`resume_markdown TEXT` per application). Binary files are rendered on-demand when you request them — keeping the DB small and the content LLM-friendly.
+
+```
+tailor_resume() → Markdown (stored in DB)
+                       ↓
+        [📄 Word Doc]   [📋 PDF]   [Both]
+              ↓               ↓
+      docx_export.py    pdf_export.py
+    (python-docx)       (reportlab)
+```
+
+### Format Choice
+
+| Format | Tool | Why |
+|---|---|---|
+| `.docx` (primary) | `python-docx` | Full style control — forces exact Heading/ListBullet styles ATS parsers recognize; no surprise tables |
+| `.pdf` (on request) | `reportlab` | Fixed layout for email attachments |
+
+### Smart Section Order
+
+Section order is inferred from the user's parsed resume — no onboarding questions, zero AI tokens for 85% of cases.
+
+**4 signals, all derived from existing data:**
+
+| Signal | Source | Cost |
+|---|---|---|
+| `years_exp` | Sum of `duration_months` from `parse_resume()` | 0 tokens |
+| `graduation_year` | Education section from `parse_resume()` | 0 tokens |
+| `has_strong_projects` | Project count from `parse_resume()` | 0 tokens |
+| `is_career_changer` | Domain match: past titles vs target role | 0 tokens |
+
+**`is_career_changer` logic** — no API call, no user question:
+```
+is_career_changer = (
+    domain_mismatch(past_titles, target_role)   ← keyword set comparison
+    AND years_exp >= 2                           ← rules out freshers with part-time jobs
+    AND any(duration_months >= 6 per role)       ← rules out short gigs
+)
+```
+
+**Decision tree (`resume/section_order.py`):**
+```
+Fresher (years_exp < 2 or no full-time role):
+  education → projects → skills → experience
+
+Career changer (domain mismatch + years_exp ≥ 2 + full-time role):
+  summary → skills → experience → education
+
+Experienced (domain match + years_exp ≥ 2):
+  summary → experience → skills → education [+ projects if strong]
+```
+
+Groq fallback (~70 tokens) only for true edge cases. Stored in `user.filters["resume_section_order"]`. Auto-updated on every new resume upload. Changeable anytime via `/settings → Resume preferences`.
+
+### ATS Parsability Rules
+
+All generated resumes enforce:
+- **Single column** — no multi-column layouts
+- **No tables for structure** — bullets only (tables confuse ATS parsers)
+- **No text boxes, headers/footers** for important content
+- **Standard section names**: `Work Experience`, `Education`, `Skills`, `Summary`
+- **Standard fonts**: Arial / Calibri — no decorative fonts
+- **Explicit heading styles** — `python-docx` `add_heading(level=1)` maps to `"Heading 1"` style, recognized by Workday, Greenhouse, Lever, LinkedIn, Indeed
+
+`python-docx` used instead of pypandoc — pypandoc converts Markdown tables → Word tables (ATS killer). `python-docx` gives direct control over every element.
+
+---
+
 ## Cover Letter Logic
 
 A cover letter is generated **only when**:
@@ -481,10 +558,12 @@ hireloop/
 │   └── scheduler.py              # (Week 3) APScheduler AsyncIOScheduler
 │
 ├── resume/
-│   ├── generator.py               # (Week 4) tailor_resume() orchestration
-│   ├── pdf_export.py              # (Week 4) reportlab PDF builder
+│   ├── generator.py               # (Week 4) tailor_resume() → store Markdown in DB
+│   ├── section_order.py           # (Week 4) infer section order from profile, zero tokens
+│   ├── docx_export.py             # (Week 4) Markdown → .docx via python-docx (ATS-safe)
+│   ├── pdf_export.py              # (Week 4) Markdown → PDF via reportlab ✅ ready
 │   ├── variants/                  # Your base resume markdown files
-│   └── output/                    # Generated PDFs (gitignored)
+│   └── output/                    # Generated files (gitignored)
 │
 └── scripts/
     └── test_provider.py           # Smoke-test any AI provider from CLI
@@ -581,9 +660,15 @@ applications
 - [x] APScheduler daily scrape loop (08:00 + 18:00)
 - [x] /fetchnow — instant on-demand scrape
 - [x] Auto-purge stale jobs after 10 days
-- [x] PDF export (reportlab) — resume/pdf_export.py
-- [ ] Resume generator — resume/generator.py (AI tailoring → markdown)
-- [ ] Job approval screen (Approve / Edit / Skip)
+- [x] PDF export (reportlab) — resume/pdf_export.py (render layer ready)
+- [ ] Resume generator — resume/generator.py (AI tailoring → store Markdown in DB)
+- [ ] Word (.docx) export — resume/docx_export.py via python-docx (ATS-safe)
+- [ ] Smart section order — resume/section_order.py (pure Python decision tree, zero tokens)
+- [ ] is_career_changer inference (domain match + years_exp + full-time role check)
+- [ ] ATS-safe constraints: single-col, no tables/text-boxes, standard section names
+- [ ] Job scraper summary card (X jobs found · Y above threshold · Z ready)
+- [ ] Job approval screen — [📄 Word] [📋 PDF] [Both] [⏭ Skip]
+- [ ] Cover letter generation (on request only)
 - [ ] Application logging to DB
 
 ### Phase 2 — Multi-user + Intelligence

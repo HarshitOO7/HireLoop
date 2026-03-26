@@ -63,10 +63,12 @@ hireloop/
 │   └── scheduler.py               # APScheduler — embedded in bot process
 │
 ├── resume/
-│   ├── generator.py
-│   ├── pdf_export.py              # reportlab — pure Python PDF
+│   ├── generator.py               # tailor_resume() → store Markdown TEXT in DB
+│   ├── section_order.py           # infer section order from profile (zero tokens, pure Python)
+│   ├── docx_export.py             # Markdown → .docx via python-docx (ATS-safe, primary)
+│   ├── pdf_export.py              # Markdown → PDF via reportlab (on-request) ✅
 │   ├── variants/                  # base resume markdown files
-│   └── output/                    # generated PDFs (gitignored)
+│   └── output/                    # generated files (gitignored)
 │
 ├── tests/
 └── scripts/
@@ -402,11 +404,19 @@ DONE WHEN: /start wizard works end-to-end, skill graph in DB
 DONE WHEN: paste URL in Telegram → get fit analysis → verify skill → DB updated
 
 ### Week 4 — Resume + Approval
-- resume/generator.py + resume/pdf_export.py (reportlab)
+- resume/section_order.py — pure Python decision tree (fresher/career changer/experienced)
+  - is_career_changer = domain_mismatch + years_exp >= 2 + any(duration_months >= 6)
+  - stored in user.filters["resume_section_order"], auto-updated on resume upload
+  - Groq fallback (~70 tokens) for edge cases only
+- resume/generator.py — tailor_resume() → store Markdown TEXT in DB
+- resume/docx_export.py — python-docx (ATS-safe, explicit styles, primary format)
+- resume/pdf_export.py — reportlab (on-request, already done ✅)
+- ATS-safe: single-col, no tables, standard section names, add_heading(level=1)
+- job scraper summary card before first job card (X found · Y above threshold)
+- bot/handlers/job_approval.py — [📄 Word] [📋 PDF] [Both] [⏭ Skip]
 - Conditional cover letter logic
-- bot/handlers/job_approval.py
 - docker-compose.yml
-DONE WHEN: full loop works end-to-end, PDF delivered, application logged
+DONE WHEN: full loop works end-to-end, Word + PDF delivered, application logged
 
 ---
 
@@ -422,7 +432,9 @@ DONE WHEN: full loop works end-to-end, PDF delivered, application logged
 8. All secrets from .env only — never hardcode
 9. Log everything to DB — every job seen, skill verified, application made
 10. Filters run BEFORE scraping — pass to JobSpy, don't post-filter a huge list
-11. PDF export via reportlab (pure Python) — not WeasyPrint (system deps)
+11. Resume stored as Markdown TEXT in DB — render to .docx (python-docx) or PDF (reportlab) on-demand
+12. .docx is primary format (ATS-safe); PDF is on-request only — use python-docx NOT pypandoc (pypandoc converts MD tables → Word tables = ATS killer)
+13. Section order inferred from profile via section_order.py — zero tokens, pure Python decision tree
 12. Background scheduling via APScheduler AsyncIOScheduler — not n8n
 
 ---
