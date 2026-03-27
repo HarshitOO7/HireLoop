@@ -1,5 +1,5 @@
 """
-JobSpy wrapper — scrapes Indeed, LinkedIn, Glassdoor, and Google Jobs.
+JobSpy wrapper — scrapes Indeed, LinkedIn, and Glassdoor.
 
 JobSpy is synchronous (pandas-based), so we run it in a thread executor
 to avoid blocking the async event loop.
@@ -22,7 +22,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_SITES = ["indeed", "linkedin", "glassdoor", "google"]
+_DEFAULT_SITES = ["indeed", "linkedin", "glassdoor"]
 
 
 def _hours_for_freq(notify_freq: str | None) -> int:

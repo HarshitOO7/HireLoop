@@ -101,7 +101,7 @@ AI_TEMPERATURE=0.3
 # ollama     → llama3.2 (local, free)
 
 TELEGRAM_BOT_TOKEN=from_botfather
-SERPAPI_KEY=optional_for_google_jobs
+SERPAPI_KEY=  # unused for now (Google Jobs scraping broken, revisit Phase 2)
 DATABASE_URL=sqlite:///hireloop.db
 OLLAMA_HOST=http://localhost:11434
 ```
@@ -353,7 +353,7 @@ SkillEvidence(company="Acme Corp", duration_months=8,
 from jobspy import scrape_jobs
 
 jobs = scrape_jobs(
-    site_name=["indeed", "linkedin", "glassdoor", "google"],
+    site_name=["indeed", "linkedin", "glassdoor"],
     search_term=user_filters["role"],
     location=user_filters["location"],
     is_remote=user_filters.get("remote_only", False),
@@ -471,4 +471,8 @@ DONE WHEN: full loop works end-to-end, Word + PDF delivered, application logged
 
 ## Current Status
 
-Week 1 foundation complete. Start with Week 2 (Telegram bot + onboarding).
+Week 1–3 complete. Scraper pipeline testing in progress:
+- Indeed ✅
+- LinkedIn ⚠️ not fully tested (may have bugs)
+- Google Jobs ❌ skipped (JS-only page, JobSpy broken, revisit Phase 2)
+- Glassdoor ← next

@@ -57,12 +57,11 @@ def location_keyboard(count: int = 0) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[InlineKeyboardButton(label, callback_data="done_locations")]])
 
 
-_ALL_SITES = ["indeed", "linkedin", "glassdoor", "google"]
+_ALL_SITES = ["indeed", "linkedin", "glassdoor"]
 _SITE_LABELS = {
     "indeed":    "Indeed ⚡",
     "linkedin":  "LinkedIn ⚡",
     "glassdoor": "Glassdoor 🐢 slow",
-    "google":    "Google 🐢 slow",
 }
 
 

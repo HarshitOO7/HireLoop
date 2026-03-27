@@ -62,7 +62,7 @@ DEFAULT_ROLE        = "Software Developer"   # override with --role for any othe
 DEFAULT_LOCATION    = ""          # blank = anywhere
 DEFAULT_COUNTRY     = "Canada"
 DEFAULT_REMOTE      = "any"       # any | remote | onsite
-DEFAULT_SITES       = ["indeed", "linkedin", "glassdoor", "google"]
+DEFAULT_SITES       = ["indeed", "linkedin", "glassdoor"]
 DEFAULT_RESULTS     = 50          # results per search term — high enough to not miss 24h jobs
 DEFAULT_HOURS_OLD   = 24          # 24 h default; use --hours to override
 MAX_TERMS           = 8           # limit role variants to this many
@@ -76,7 +76,7 @@ def _parse_args():
     p.add_argument("--country",  default=DEFAULT_COUNTRY,  help="Country for Indeed (e.g. Canada, USA)")
     p.add_argument("--remote",   default=DEFAULT_REMOTE,   choices=["any","remote","onsite"])
     p.add_argument("--sites",    default=DEFAULT_SITES,    nargs="+",
-                   choices=["indeed","linkedin","glassdoor","google"])
+                   choices=["indeed","linkedin","glassdoor"])
     p.add_argument("--results",  default=DEFAULT_RESULTS,  type=int, help="Results per search term")
     p.add_argument("--hours",    default=DEFAULT_HOURS_OLD,type=int, help="Hours old cutoff")
     p.add_argument("--terms",    default=MAX_TERMS,        type=int, help="Max role variants to test")
