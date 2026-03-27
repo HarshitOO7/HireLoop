@@ -10,6 +10,7 @@ python-telegram-bot[job-queue]
 
 # Job scraping
 python-jobspy
+curl-cffi        # Cloudflare bypass for Glassdoor (tls_client gets blocked on CA IPs)
 # httpx already listed above (used by Jina Reader)
 
 # Database

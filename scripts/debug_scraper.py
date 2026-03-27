@@ -29,6 +29,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from dotenv import load_dotenv
 load_dotenv()
 
+# Apply Glassdoor curl_cffi patch before any JobSpy import
+from jobs.glassdoor_patch import apply_glassdoor_patch
+apply_glassdoor_patch()
+
 # ── output paths ─────────────────────────────────────────────────────────────
 SCRIPTS_DIR  = Path(__file__).resolve().parent
 TIMESTAMP    = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -52,8 +56,15 @@ root_logger.addHandler(file_handler)
 root_logger.addHandler(console_handler)
 
 # Silence noise
-for noisy in ("urllib3", "httpx", "httpcore", "JobSpy:Glassdoor"):
+for noisy in ("urllib3", "httpx", "httpcore"):
     logging.getLogger(noisy).setLevel(logging.WARNING)
+
+# JobSpy loggers use propagate=False — wire them to our handlers so errors appear in the log
+for jobspy_name in ("JobSpy:Glassdoor", "JobSpy:LinkedIn", "JobSpy:Indeed"):
+    jl = logging.getLogger(jobspy_name)
+    jl.setLevel(logging.DEBUG)
+    jl.addHandler(file_handler)
+    jl.addHandler(console_handler)
 
 logger = logging.getLogger("debug_scraper")
 

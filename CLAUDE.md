@@ -471,8 +471,14 @@ DONE WHEN: full loop works end-to-end, Word + PDF delivered, application logged
 
 ## Current Status
 
-Week 1–3 complete. Scraper pipeline testing in progress:
+Week 1–3 complete. Scraper pipeline testing:
 - Indeed ✅
 - LinkedIn ⚠️ not fully tested (may have bugs)
 - Google Jobs ❌ skipped (JS-only page, JobSpy broken, revisit Phase 2)
-- Glassdoor ← next
+- Glassdoor ✅ working via curl_cffi patch (see jobs/glassdoor_patch.py)
+
+### Glassdoor fix summary
+Canadian IPs get geo-redirected glassdoor.com → glassdoor.ca, where Cloudflare
+blocks tls_client (JobSpy default) with 403.  Fix: monkey-patch in jobs/glassdoor_patch.py
+replaces JobSpy's create_session with curl_cffi (Chrome124 impersonation) and tolerates
+partial GraphQL errors (SEO-only 503s are non-fatal).  Applied at import time in scraper.py.

@@ -20,7 +20,14 @@ hours_old is derived from user.notify_freq so we never show stale duplicates:
 import asyncio
 import logging
 
+from jobs.glassdoor_patch import apply_glassdoor_patch
+
 logger = logging.getLogger(__name__)
+
+# Apply Glassdoor curl_cffi patch once at import time.
+# On Canadian IPs, glassdoor.com geo-redirects to glassdoor.ca where tls_client
+# gets Cloudflare-blocked.  curl_cffi's Chrome impersonation passes the check.
+apply_glassdoor_patch()
 
 _DEFAULT_SITES = ["indeed", "linkedin", "glassdoor"]
 
