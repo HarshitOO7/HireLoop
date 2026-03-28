@@ -9,6 +9,7 @@ Each cycle:
   scrape → filter → parse_job → analyze_fit → send job card to Telegram → save to DB
 """
 
+import asyncio
 import logging
 import time
 import uuid
@@ -50,6 +51,11 @@ async def _get_user_profile(user_id: str, session) -> dict:
 
 # ── Job card formatting ──────────────────────────────────────────────────────
 
+def _md(text) -> str:
+    """Escape Telegram MarkdownV1 special chars in user-controlled strings."""
+    return (str(text) if text else "").replace("\\", "\\\\").replace("_", "\\_").replace("*", "\\*").replace("`", "\\`").replace("[", "\\[")
+
+
 def _build_card_text(job: Job, parsed: dict, fit: dict) -> str:
     score  = fit.get("fit_score", 0)
     action = fit.get("action", "consider")
@@ -58,15 +64,15 @@ def _build_card_text(job: Job, parsed: dict, fit: dict) -> str:
     matched = fit.get("matched_skills", [])
     gaps    = fit.get("missing_required", [])
 
-    matched_str = ", ".join(matched[:5]) or "—"
-    gap_str     = ", ".join(g["skill"] for g in gaps[:4]) if gaps else "None"
+    matched_str = ", ".join(_md(s) for s in matched[:5]) or "—"
+    gap_str     = ", ".join(_md(g.get("skill", "?")) for g in gaps[:4]) if gaps else "None"
 
-    salary   = parsed.get("salary_range") or "—"
-    location = parsed.get("location") or "—"
+    salary   = _md(parsed.get("salary_range") or "—")
+    location = _md(parsed.get("location") or "—")
 
     return (
-        f"🏢 *{parsed.get('title') or job.title}*\n"
-        f"{job.company} · {location} · {salary}\n\n"
+        f"🏢 *{_md(parsed.get('title') or job.title)}*\n"
+        f"{_md(job.company)} · {location} · {salary}\n\n"
         f"Fit Score: *{score}%* · {label}\n\n"
         f"✅ Matched: {matched_str}\n"
         f"❓ Gaps: {gap_str}"
@@ -135,6 +141,20 @@ async def _process_user(user: User, bot, ai) -> int:
         search_terms=role_variants or None,
         hours_old=hours_old,
     )
+
+    # Send summary before cards
+    await bot.send_message(
+        chat_id=user.telegram_id,
+        text=(
+            f"🔍 *Job search complete*\n\n"
+            f"• Scraped: {len(raw_jobs)} raw listings\n"
+            f"• After dedup/filters: {len(filtered)}\n"
+            f"• Analyzing top {min(len(filtered), 10)} for fit...\n\n"
+            f"_Cards incoming one by one_ 👇"
+        ),
+        parse_mode="Markdown",
+    )
+
     if not filtered:
         logger.info("[scheduler] no new jobs after filtering for user=%s", user.telegram_id)
         return 0
@@ -152,62 +172,82 @@ async def _process_user(user: User, bot, ai) -> int:
     for sk in skill_keywords:
         skill_tokens.update(w for w in sk.split() if len(w) >= 2)
 
-    async with AsyncSessionLocal() as session:
-        async with session.begin():
-            for raw in filtered[:10]:  # cap at 10 notifications per cycle
-                try:
-                    desc   = raw.get("description") or ""
+    for raw in filtered[:10]:  # cap at 10 notifications per cycle
+        try:
+            desc    = raw.get("description") or ""
+            job_url = raw.get("job_url") or raw.get("url") or ""
+            h       = raw.get("url_hash") or url_hash(job_url)
 
-                    # Fast keyword pre-filter: skip AI entirely if no skill overlap
-                    if skill_keywords or skill_tokens:
-                        desc_lower = desc.lower()
-                        has_overlap = any(kw in desc_lower for kw in skill_keywords) or                                       any(tok in desc_lower for tok in skill_tokens)
-                        if not has_overlap:
-                            logger.debug("[scheduler] keyword pre-filter: no skill overlap — skip (saves 2 AI calls)")
-                            continue
-
-                    parsed = await ai.parse_job(desc)
-                    fit    = await ai.analyze_fit(parsed, profile)
-                    score  = fit.get("fit_score", 0)
-
-                    if score < user.min_fit_score:
-                        logger.debug(
-                            "[scheduler] score %d < threshold %d — skip", score, user.min_fit_score
-                        )
-                        continue
-
-                    job_url = raw.get("job_url") or raw.get("url") or ""
-                    job = Job(
-                        id=str(uuid.uuid4()),
-                        user_id=user.id,
-                        title=parsed.get("title") or raw.get("title") or "Unknown",
-                        company=raw.get("company") or parsed.get("company") or "Unknown",
-                        url=job_url,
-                        url_hash=raw.get("url_hash") or url_hash(job_url),
-                        raw_jd=desc[:10_000],
-                        parsed={**parsed, "_fit": fit},
-                        fit_score=score,
-                        cover_letter_required=bool(parsed.get("requires_cover_letter")),
-                        status="pending",
-                        created_at=datetime.utcnow(),
-                    )
-                    session.add(job)
-                    await session.flush()
-
-                    card_text = _build_card_text(job, parsed, fit)
-                    fallback_url = job_url or f"https://www.google.com/search?q={job.title.replace(' ', '+')}"
-
-                    await bot.send_message(
-                        chat_id=user.telegram_id,
-                        text=card_text,
-                        parse_mode="Markdown",
-                        reply_markup=job_card_keyboard(job.id, fallback_url),
-                    )
-                    notified += 1
-
-                except Exception as e:
-                    logger.error("[scheduler] error on job for user=%s: %s", user.telegram_id, e, exc_info=True)
+            # Fast keyword pre-filter: skip AI entirely if no skill overlap.
+            # Save a minimal "rejected" row so re-fetches don't repeat this check.
+            if skill_keywords or skill_tokens:
+                desc_lower = desc.lower()
+                has_overlap = (
+                    any(kw in desc_lower for kw in skill_keywords)
+                    or any(tok in desc_lower for tok in skill_tokens)
+                )
+                if not has_overlap:
+                    logger.debug("[scheduler] keyword pre-filter: no skill overlap — skip (saves 2 AI calls)")
+                    async with AsyncSessionLocal() as session:
+                        async with session.begin():
+                            session.add(Job(
+                                id=str(uuid.uuid4()), user_id=user.id,
+                                title=raw.get("title") or "Unknown",
+                                company=raw.get("company") or "Unknown",
+                                url=job_url, url_hash=h,
+                                status="rejected", created_at=datetime.utcnow(),
+                            ))
                     continue
+
+            parsed = await ai.parse_job(desc)
+            fit    = await ai.analyze_fit(parsed, profile)
+            score  = fit.get("fit_score", 0)
+
+            # Save even below-threshold jobs so re-fetches don't re-run AI on them.
+            job_status = "pending" if score >= user.min_fit_score else "rejected"
+            job = Job(
+                id=str(uuid.uuid4()),
+                user_id=user.id,
+                title=raw.get("title") or parsed.get("title") or "Unknown",
+                company=raw.get("company") or parsed.get("company") or "Unknown",
+                url=job_url,
+                url_hash=h,
+                raw_jd=desc[:10_000],
+                parsed={**parsed, "_fit": fit},
+                fit_score=score,
+                cover_letter_required=bool(parsed.get("requires_cover_letter")),
+                status=job_status,
+                created_at=datetime.utcnow(),
+            )
+            async with AsyncSessionLocal() as session:
+                async with session.begin():
+                    session.add(job)
+
+            if score < user.min_fit_score:
+                logger.debug("[scheduler] score %d < threshold %d — saved as rejected", score, user.min_fit_score)
+                continue
+
+            card_text = _build_card_text(job, parsed, fit)
+            fallback_url = job_url or f"https://www.google.com/search?q={job.title.replace(' ', '+')}"
+
+            await bot.send_message(
+                chat_id=user.telegram_id,
+                text=card_text,
+                parse_mode="Markdown",
+                reply_markup=job_card_keyboard(job.id, fallback_url),
+            )
+            notified += 1
+            await asyncio.sleep(1)  # pace cards — avoid flooding
+
+        except Exception as e:
+            logger.error("[scheduler] error on job for user=%s: %s", user.telegram_id, e, exc_info=True)
+            continue
+
+    if notified:
+        await bot.send_message(
+            chat_id=user.telegram_id,
+            text=f"✅ Done — {notified} job{'s' if notified != 1 else ''} above your {user.min_fit_score}% threshold. Use 📋 Pending Jobs to review anytime.",
+        )
 
     logger.info("[scheduler] done — user=%s  notified=%d", user.telegram_id, notified)
     return notified
@@ -257,6 +297,9 @@ async def run_scrape_cycle(bot, ai, telegram_id: str | None = None) -> int:
 
     total = 0
     for user in users:
+        if (user.filters or {}).get("paused"):
+            logger.info("[scheduler] skipping paused user=%s", user.telegram_id)
+            continue
         try:
             n = await _process_user(user, bot, ai)
             total += n or 0

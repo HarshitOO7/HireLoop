@@ -1,8 +1,9 @@
 """
 JobSpy wrapper — scrapes Indeed, LinkedIn, and Glassdoor.
 
-JobSpy is synchronous (pandas-based), so we run it in a thread executor
-to avoid blocking the async event loop.
+JobSpy is synchronous (pandas-based), so each (term × location) combo runs in its
+own thread executor slot.  All combos are gathered in parallel so 8 variants finish
+in ~the time of 1 instead of sequentially.
 
 Multiple locations: if user.filters["locations"] is a list, one scrape is run
 per location and results are merged. Deduplication happens downstream in filters.py.
@@ -71,63 +72,62 @@ async def scrape_for_user(user, role_variants: list[str] | None = None) -> list[
         locations or "any", country, remote, sites, hours_old,
     )
 
-    # ── JobSpy (sync, runs in thread executor) ────────────────────────────────
-    def _sync_scrape():
+    # ── One sync function per (term × location) combo ────────────────────────
+    per_variant = 50  # fetch up to 50 per combo — dedup handles overlap
+
+    def _scrape_one(term: str, loc: str):
         import pandas as pd
         from jobspy import scrape_jobs
 
-        all_dfs = []
-        per_variant = 50  # fetch up to 50 per (term × location) — dedup handles overlap
+        kwargs = dict(
+            site_name=sites,
+            search_term=term,
+            is_remote=is_remote,
+            results_wanted=per_variant,
+            hours_old=hours_old,
+            fetch_description=True,
+            linkedin_fetch_description=True,
+        )
+        if loc:
+            kwargs["location"] = loc
+        elif country:
+            # No specific location set — use country as location so Glassdoor
+            # resolves the correct country-level location ID instead of
+            # defaulting to US nationwide (hardcoded ID 11047).
+            kwargs["location"] = country
+        if country:
+            kwargs["country_indeed"] = country
 
-        for term in search_terms:
-            for loc in search_locations:
-                kwargs = dict(
-                    site_name=sites,
-                    search_term=term,
-                    is_remote=is_remote,
-                    results_wanted=per_variant,
-                    hours_old=hours_old,
-                    fetch_description=True,
-                    linkedin_fetch_description=True,
-                )
-                if loc:
-                    kwargs["location"] = loc
-                elif country:
-                    # No specific location set — use country as location so Glassdoor
-                    # resolves the correct country-level location ID instead of
-                    # defaulting to US nationwide (hardcoded ID 11047).
-                    kwargs["location"] = country
-                if country:
-                    kwargs["country_indeed"] = country
+        try:
+            df = scrape_jobs(**kwargs)
+            if df is not None and not df.empty:
+                logger.debug("[scraper] jobspy term=%r location=%r → %d results",
+                             term, loc or "any", len(df))
+                return df
+        except Exception as e:
+            logger.error("[scraper] jobspy failed term=%r location=%r: %s", term, loc, e)
+        return None
 
-                try:
-                    df = scrape_jobs(**kwargs)
-                    if df is not None and not df.empty:
-                        all_dfs.append(df)
-                        logger.debug("[scraper] jobspy term=%r location=%r → %d results",
-                                     term, loc or "any", len(df))
-                except Exception as e:
-                    logger.error("[scraper] jobspy failed term=%r location=%r: %s",
-                                 term, loc, e)
-
-        if not all_dfs:
-            return None
-        return pd.concat(all_dfs, ignore_index=True)
-
-    # ── Run JobSpy in thread executor ────────────────────────────────────────
+    # ── Fan out all combos in parallel (each in its own thread) ──────────────
     loop = asyncio.get_event_loop()
-    df_result = await loop.run_in_executor(None, _sync_scrape)
+    combos = [(term, loc) for term in search_terms for loc in search_locations]
+    tasks  = [loop.run_in_executor(None, _scrape_one, term, loc) for term, loc in combos]
+    dfs    = await asyncio.gather(*tasks)
+
+    import pandas as pd
+    all_dfs = [df for df in dfs if df is not None]
 
     records: list[dict] = []
-    if df_result is not None:
+    if all_dfs:
         try:
-            if not df_result.empty:
-                records = df_result.fillna("").to_dict("records")
+            merged = pd.concat(all_dfs, ignore_index=True)
+            if not merged.empty:
+                records = merged.fillna("").to_dict("records")
         except Exception:
             pass
 
     logger.info(
-        "[scraper] got %d raw jobs — %d term(s) × %d location(s)",
+        "[scraper] got %d raw jobs — %d term(s) × %d location(s) (parallel)",
         len(records), len(search_terms), len(search_locations),
     )
     return records

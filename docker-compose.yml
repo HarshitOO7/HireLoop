@@ -1,0 +1,10 @@
+version: "3.9"
+
+services:
+  bot:
+    build: .
+    env_file: .env
+    volumes:
+      - ./hireloop.db:/app/hireloop.db          # persist SQLite
+      - ./resume/output:/app/resume/output       # persist generated files
+    restart: unless-stopped

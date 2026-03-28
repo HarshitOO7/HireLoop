@@ -146,12 +146,28 @@ MAIN_KEYBOARD = ReplyKeyboardMarkup([
 def job_card_keyboard(job_id: str, job_url: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("✅ I know these", callback_data=f"job_skills_{job_id}"),
-            InlineKeyboardButton("⏭ Skip", callback_data=f"job_skip_{job_id}"),
+            InlineKeyboardButton("✅ I know these",     callback_data=f"job_skills_{job_id}"),
+            InlineKeyboardButton("⏭ Skip",              callback_data=f"job_skip_{job_id}"),
         ],
         [
-            InlineKeyboardButton("📄 Full JD", callback_data=f"job_fulljd_{job_id}"),
-            InlineKeyboardButton("🔗 Open Link", url=job_url),
+            InlineKeyboardButton("➡️ Generate Anyway", callback_data=f"job_generate_{job_id}"),
+        ],
+        [
+            InlineKeyboardButton("📄 Full JD",          callback_data=f"job_fulljd_{job_id}"),
+            InlineKeyboardButton("🔗 Open Link",        url=job_url),
+        ],
+    ])
+
+
+def resume_delivery_keyboard(job_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📄 Word (.docx)", callback_data=f"deliver_docx_{job_id}"),
+            InlineKeyboardButton("📋 PDF",          callback_data=f"deliver_pdf_{job_id}"),
+        ],
+        [
+            InlineKeyboardButton("📦 Both",         callback_data=f"deliver_both_{job_id}"),
+            InlineKeyboardButton("⏭ Skip",          callback_data=f"skip_job_{job_id}"),
         ],
     ])
 

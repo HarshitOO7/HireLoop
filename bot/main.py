@@ -35,6 +35,7 @@ from bot.handlers.skill_verify import (
     get_jobs_command_handler,
     cmd_pending_jobs,
 )
+from bot.handlers.job_approval import get_job_approval_handlers
 from bot.keyboards import MAIN_KEYBOARD
 from db.models import Base
 from db.session import engine
@@ -271,6 +272,9 @@ def main():
     app.add_handler(CommandHandler("fetchnow", cmd_fetch_now))
 
     for h in get_job_card_handlers():
+        app.add_handler(h)
+
+    for h in get_job_approval_handlers():
         app.add_handler(h)
 
     # Catch-all for persistent keyboard taps

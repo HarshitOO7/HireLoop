@@ -365,20 +365,36 @@ async def done_uploading(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     logger.info("[done_uploading] starting resume analysis — %d file(s)", n)
 
-    async def _parse_one(i: int, text: str) -> list:
+    async def _parse_one(i: int, text: str) -> tuple[list, list]:
         logger.info("[done_uploading] parsing resume %d/%d — %d chars", i, n, len(text))
         t_file = time.monotonic()
         try:
-            parsed = await ai.parse_resume(text)
+            parsed     = await ai.parse_resume(text)
             raw_skills = parsed.get("skills", [])
-            logger.info("[done_uploading] resume %d done in %.2fs — %d raw skills", i, time.monotonic() - t_file, len(raw_skills))
-            return raw_skills
+            work_hist  = parsed.get("work_history", [])
+            logger.info("[done_uploading] resume %d done in %.2fs — %d skills  %d work entries",
+                        i, time.monotonic() - t_file, len(raw_skills), len(work_hist))
+            return raw_skills, work_hist
         except Exception as e:
             logger.error("[done_uploading] resume %d parse error (%.2fs): %s", i, time.monotonic() - t_file, e)
-            return []
+            return [], []
 
-    results = await asyncio.gather(*[_parse_one(i, t) for i, t in enumerate(resume_texts, 1)])
-    all_skills = [s for batch in results for s in batch]
+    results   = await asyncio.gather(*[_parse_one(i, t) for i, t in enumerate(resume_texts, 1)])
+    all_skills = [s for batch, _wh in results for s in batch]
+
+    # Merge work histories (de-dupe by company+role, keep longest duration)
+    wh_map: dict[str, dict] = {}
+    for _, wh in results:
+        for entry in wh:
+            key = f"{entry.get('company', '')}|{entry.get('role', '')}"
+            if key not in wh_map or (entry.get("duration_months") or 0) > (wh_map[key].get("duration_months") or 0):
+                wh_map[key] = {
+                    "role_title":      entry.get("role", ""),
+                    "company":         entry.get("company", ""),
+                    "duration_months": entry.get("duration_months") or 0,
+                    "last_used_year":  entry.get("last_used_year"),
+                }
+    context.user_data["work_history"] = list(wh_map.values())
 
     # Persist raw resume text so generator.py can use it as base for tailoring.
     # Join multiple uploads with a separator; generator picks this up from user.base_resume_markdown.
@@ -769,11 +785,17 @@ async def set_fit_score(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 
     user = update.effective_user
     try:
+        # Embed work_history into filters so section_order.py can read it without a separate column
+        saved_filters   = context.user_data.get("filters", {})
+        saved_wh        = context.user_data.get("work_history", [])
+        if saved_wh:
+            saved_filters = {**saved_filters, "work_history": saved_wh}
+
         await _save_onboarding_to_db(
             telegram_id=str(user.id),
             name=user.first_name or user.username or "User",
             confirmed_skills=context.user_data.get("confirmed_skills", []),
-            filters=context.user_data.get("filters", {}),
+            filters=saved_filters,
             notify_freq=context.user_data.get("notify_freq", "daily"),
             min_fit_score=score,
             base_resume_markdown=context.user_data.get("base_resume_markdown", ""),
@@ -822,7 +844,7 @@ def build_onboarding_handler() -> ConversationHandler:
             ],
             UPLOAD_RESUME: [
                 MessageHandler(filters.Document.ALL, handle_document),
-                CallbackQueryHandler(done_uploading, pattern="done_uploading"),
+                CallbackQueryHandler(done_uploading, pattern="^done_uploading$"),
             ],
             CONFIRM_SKILLS: [
                 CallbackQueryHandler(skill_confirmed,         pattern=r"^skill_confirm_\d+$"),

@@ -68,28 +68,16 @@ async def _ask_next_gap(context: ContextTypes.DEFAULT_TYPE, msg) -> int:
 
 
 async def _finish_verification(context: ContextTypes.DEFAULT_TYPE, msg) -> int:
-    job_id = context.user_data.get("verify_job_id")
-    verified_count = 0
+    job_id  = context.user_data.get("verify_job_id")
+    user_id = context.user_data.get("verify_user_id")
 
-    if job_id:
-        from sqlalchemy import func, select
-        async with AsyncSessionLocal() as session:
-            job_result = await session.execute(select(Job).where(Job.id == job_id))
-            job = job_result.scalar_one_or_none()
-            if job:
-                cnt = await session.execute(
-                    select(func.count()).select_from(SkillNode).where(
-                        SkillNode.user_id == job.user_id,
-                        SkillNode.status.like("verified_%"),
-                    )
-                )
-                verified_count = cnt.scalar() or 0
+    await msg.reply_text("All gaps reviewed! Skill graph updated.")
 
-    await msg.reply_text(
-        f"All gaps reviewed! Your skill graph has been updated.\n\n"
-        f"Verified skills in graph: {verified_count}\n\n"
-        "Resume generation is coming in Week 4 — your context is saved and will be used automatically."
-    )
+    if job_id and user_id:
+        from bot.handlers.job_approval import start_resume_generation
+        ai = context.application.bot_data["ai"]
+        await start_resume_generation(job_id, user_id, msg, ai)
+
     context.user_data.clear()
     return ConversationHandler.END
 
@@ -116,13 +104,17 @@ async def job_skills_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     if not gaps:
         await query.edit_message_text(
-            "No skill gaps found for this job — your profile already covers everything."
+            "No skill gaps — your profile already covers everything."
         )
+        from bot.handlers.job_approval import start_resume_generation
+        ai = context.application.bot_data["ai"]
+        await start_resume_generation(job_id, job.user_id, query.message, ai)
         return ConversationHandler.END
 
-    context.user_data["verify_job_id"] = job_id
-    context.user_data["verify_gaps"]   = gaps
-    context.user_data["verify_idx"]    = 0
+    context.user_data["verify_job_id"]  = job_id
+    context.user_data["verify_user_id"] = job.user_id
+    context.user_data["verify_gaps"]    = gaps
+    context.user_data["verify_idx"]     = 0
 
     await query.edit_message_text(
         f"Found {len(gaps)} gap skill(s) to verify. I'll ask about each one.\n\n"
@@ -180,7 +172,8 @@ async def handle_verify_context(update: Update, context: ContextTypes.DEFAULT_TY
                         source        = "telegram",
                     ))
 
-        await update.message.reply_text(f"Saved: *{skill_name}* ✅", parse_mode="Markdown")
+        safe_name = skill_name.replace("_", "\\_").replace("*", "\\*").replace("`", "\\`")
+        await update.message.reply_text(f"Saved: *{safe_name}* ✅", parse_mode="Markdown")
     else:
         await update.message.reply_text(f"Skipped: {skill_name}")
 
@@ -190,11 +183,8 @@ async def handle_verify_context(update: Update, context: ContextTypes.DEFAULT_TY
 
 # ── Standalone job card callbacks ────────────────────────────────────────────
 
-async def job_skip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query  = update.callback_query
-    await query.answer()
-    job_id = query.data.split("job_skip_", 1)[1]
-
+async def _do_skip_job(query, job_id: str) -> None:
+    """Shared logic: mark a job as skipped regardless of callback prefix."""
     from sqlalchemy import select
     async with AsyncSessionLocal() as session:
         async with session.begin():
@@ -202,8 +192,39 @@ async def job_skip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             job = result.scalar_one_or_none()
             if job:
                 job.status = "skipped"
-
     await query.edit_message_text("Job skipped.")
+
+
+async def job_skip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles job_skip_{id} from the job card keyboard."""
+    query  = update.callback_query
+    await query.answer()
+    job_id = query.data.split("job_skip_", 1)[1]
+    await _do_skip_job(query, job_id)
+
+
+async def job_skip_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles skip_job_{id} from resume delivery / approval keyboards."""
+    query  = update.callback_query
+    await query.answer()
+    job_id = query.data.split("skip_job_", 1)[1]
+    await _do_skip_job(query, job_id)
+
+
+async def job_generate_anyway(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """User tapped [➡️ Generate Anyway] — skip skill verify, go straight to resume gen."""
+    query  = update.callback_query
+    await query.answer()
+    job_id = query.data.split("job_generate_", 1)[1]
+
+    job = await _get_job(job_id)
+    if not job:
+        await query.edit_message_text("Job not found — it may have expired.")
+        return
+
+    from bot.handlers.job_approval import start_resume_generation
+    ai = context.application.bot_data["ai"]
+    await start_resume_generation(job_id, job.user_id, query.message, ai)
 
 
 async def job_full_jd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -220,9 +241,10 @@ async def job_full_jd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     jd_text = job.raw_jd[:3000] + ("…" if len(job.raw_jd) > 3000 else "")
     link    = f"\n\n🔗 {job.url}" if job.url else ""
 
+    # Send header (Markdown) + raw body (no parse_mode) as one plain message
+    # to avoid crashes on unescaped * _ ` [ characters in the JD text.
     await query.message.reply_text(
-        f"📄 *{job.title}* @ {job.company}\n\n{jd_text}{link}",
-        parse_mode="Markdown",
+        f"📄 {job.title} @ {job.company}\n\n{jd_text}{link}",
     )
 
 
@@ -261,17 +283,19 @@ async def cmd_pending_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     await update.message.reply_text(f"You have {len(pending)} pending job(s):")
 
+    def _md(t) -> str:
+        return (str(t) if t else "").replace("\\", "\\\\").replace("_", "\\_").replace("*", "\\*").replace("`", "\\`").replace("[", "\\[")
+
     for job in pending:
         fit    = (job.parsed or {}).get("_fit", {})
-        parsed = {k: v for k, v in (job.parsed or {}).items() if not k.startswith("_")}
 
-        matched = ", ".join(fit.get("matched_skills", [])[:4]) or "—"
+        matched = ", ".join(_md(s) for s in fit.get("matched_skills", [])[:4]) or "—"
         gaps    = fit.get("missing_required", [])
-        gap_str = ", ".join(g["skill"] for g in gaps[:3]) if gaps else "None"
+        gap_str = ", ".join(_md(g.get("skill", "?")) for g in gaps[:3]) if gaps else "None"
 
         text = (
-            f"🏢 *{job.title}*\n"
-            f"{job.company}\n\n"
+            f"🏢 *{_md(job.title)}*\n"
+            f"{_md(job.company)}\n\n"
             f"Fit Score: *{job.fit_score or 0:.0f}%*\n"
             f"✅ Matched: {matched}\n"
             f"❓ Gaps: {gap_str}"
@@ -302,10 +326,12 @@ def build_skill_verify_handler() -> ConversationHandler:
 
 
 def get_job_card_handlers() -> list:
-    """Standalone handlers for [⏭ Skip] and [📄 Full JD] buttons."""
+    """Standalone handlers for job card buttons."""
     return [
-        CallbackQueryHandler(job_skip,    pattern=r"^job_skip_"),
-        CallbackQueryHandler(job_full_jd, pattern=r"^job_fulljd_"),
+        CallbackQueryHandler(job_skip,            pattern=r"^job_skip_"),
+        CallbackQueryHandler(job_skip_delivery,   pattern=r"^skip_job_"),
+        CallbackQueryHandler(job_full_jd,         pattern=r"^job_fulljd_"),
+        CallbackQueryHandler(job_generate_anyway, pattern=r"^job_generate_"),
     ]
 
 
