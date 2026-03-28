@@ -19,11 +19,12 @@ class User(Base):
     telegram_id     = Column(String, unique=True, nullable=False)
     name            = Column(String)
     filters         = Column(JSON)          # role, location, salary, remote, blacklist
-    notify_freq     = Column(String, default="daily")   # daily | realtime | twice_daily
-    min_fit_score   = Column(Integer, default=60)
-    daily_app_limit = Column(Integer, default=5)
-    onboarded       = Column(Boolean, default=False)
-    created_at      = Column(DateTime, default=datetime.utcnow)
+    notify_freq          = Column(String, default="daily")   # daily | realtime | twice_daily
+    min_fit_score        = Column(Integer, default=60)
+    daily_app_limit      = Column(Integer, default=5)
+    onboarded            = Column(Boolean, default=False)
+    base_resume_markdown = Column(Text)   # raw text extracted from uploaded resume(s)
+    created_at           = Column(DateTime, default=datetime.utcnow)
 
     skill_nodes     = relationship("SkillNode", back_populates="user", cascade="all, delete")
     jobs            = relationship("Job", back_populates="user", cascade="all, delete")
@@ -91,9 +92,11 @@ class Application(Base):
 
     id                 = Column(Integer, primary_key=True, autoincrement=True)
     job_id             = Column(String, ForeignKey("jobs.id"), nullable=False)
-    resume_path        = Column(String)
-    cover_letter_path  = Column(String)
-    applied_at         = Column(DateTime, default=datetime.utcnow)
+    resume_path              = Column(String)
+    cover_letter_path        = Column(String)
+    resume_markdown          = Column(Text)   # tailored resume stored as Markdown
+    cover_letter_markdown    = Column(Text)   # cover letter stored as Markdown (if generated)
+    applied_at               = Column(DateTime, default=datetime.utcnow)
     # interview | rejected | ghosted | offer
     outcome            = Column(String)
     # email | manual | telegram

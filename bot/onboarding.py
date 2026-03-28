@@ -116,7 +116,7 @@ def _extract_docx(data: bytes) -> str:
 
 # ── DB helpers ──────────────────────────────────────────────────────────────
 
-async def _save_onboarding_to_db(telegram_id: str, name: str, confirmed_skills: list, filters: dict, notify_freq: str, min_fit_score: int):
+async def _save_onboarding_to_db(telegram_id: str, name: str, confirmed_skills: list, filters: dict, notify_freq: str, min_fit_score: int, base_resume_markdown: str = ""):
     async with AsyncSessionLocal() as session:
         async with session.begin():
             from sqlalchemy import select
@@ -136,6 +136,8 @@ async def _save_onboarding_to_db(telegram_id: str, name: str, confirmed_skills: 
             user.notify_freq = notify_freq
             user.min_fit_score = min_fit_score
             user.onboarded = True
+            if base_resume_markdown:
+                user.base_resume_markdown = base_resume_markdown
 
             # Wipe old skill nodes for this user (re-onboarding)
             old_nodes = await session.execute(
@@ -377,6 +379,10 @@ async def done_uploading(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     results = await asyncio.gather(*[_parse_one(i, t) for i, t in enumerate(resume_texts, 1)])
     all_skills = [s for batch in results for s in batch]
+
+    # Persist raw resume text so generator.py can use it as base for tailoring.
+    # Join multiple uploads with a separator; generator picks this up from user.base_resume_markdown.
+    context.user_data["base_resume_markdown"] = "\n\n---\n\n".join(resume_texts)
 
     logger.info("[done_uploading] all files parsed — %d total raw skills before dedup", len(all_skills))
 
@@ -770,6 +776,7 @@ async def set_fit_score(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
             filters=context.user_data.get("filters", {}),
             notify_freq=context.user_data.get("notify_freq", "daily"),
             min_fit_score=score,
+            base_resume_markdown=context.user_data.get("base_resume_markdown", ""),
         )
     except Exception as e:
         logger.error(f"DB save failed during onboarding: {e}")
