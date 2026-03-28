@@ -126,6 +126,10 @@ def _scrape_term(term: str, args) -> list[dict]:
     )
     if args.location:
         kwargs["location"] = args.location
+    elif args.country:
+        # No explicit location — use country as location fallback so Glassdoor
+        # resolves the correct country-level location ID (same logic as scraper.py).
+        kwargs["location"] = args.country
     if args.country:
         kwargs["country_indeed"] = args.country
 

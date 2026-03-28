@@ -11,6 +11,11 @@ Also: Glassdoor's /graph API sometimes returns partial errors for SEO-only
       The original code raises ValueError on ANY "errors" key, dropping real
       results.  The patched version only errors if job data itself is absent.
 
+Also: JobSpy's constant.py hardcodes headers (authority/origin/referer) to
+      www.glassdoor.com — but Canadian IPs use glassdoor.ca.  Mismatched
+      origin causes the GraphQL API to reject requests with errors + no data.
+      We fix headers to match the actual base_url before each POST.
+
 Usage:
     from jobs.glassdoor_patch import apply_glassdoor_patch
     apply_glassdoor_patch()   # call once before scrape_jobs()
@@ -18,6 +23,7 @@ Usage:
 
 import re
 import logging
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 _patched = False
@@ -56,15 +62,20 @@ def _make_curl_session(base_url: str) -> "_CurlCffiSessionWrapper":
 
 def _patched_get_csrf_token(self):
     """Fetch a fresh CSRF token using curl_cffi so Cloudflare is bypassed."""
-    base = getattr(self, "base_url", "https://www.glassdoor.com")
+    base = getattr(self, "base_url", "https://www.glassdoor.com").rstrip("/")
     try:
-        # Homepage is the most reliable page on both .com and .ca
-        resp = self.session.get(base)
+        # Use a job page — same as the original (/Job/computer-science-jobs.htm).
+        # The homepage does NOT embed CSRF tokens; job pages do.
+        resp = self.session.get(f"{base}/Job/software-engineer-jobs.htm")
+        logger.debug(
+            "[glassdoor_patch] token page status=%s len=%d",
+            resp.status_code, len(resp.text),
+        )
         tokens = re.findall(r'"token":\s*"([^"]+)"', resp.text)
         # Real CSRF tokens contain colons; Cloudflare challenge tokens are hex only
         token = next((t for t in tokens if ":" in t), None)
         if token:
-            logger.debug("[glassdoor_patch] fresh CSRF token acquired")
+            logger.debug("[glassdoor_patch] fresh CSRF token acquired: %s…", token[:20])
             return token
         logger.warning("[glassdoor_patch] no CSRF token found on %s — will use fallback", base)
         return None
@@ -101,24 +112,37 @@ def apply_glassdoor_patch() -> bool:
         # the Glassdoor class always gets a curl_cffi session without touching any
         # other JobSpy scraper.
         def _glassdoor_create_session(proxies=None, ca_cert=None, has_retry=False, **kwargs):
-            base = "https://www.glassdoor.com/"  # updated to .ca in _get_csrf_token
-            return _make_curl_session(base)
+            return _make_curl_session("")
 
         _gd_module.create_session = _glassdoor_create_session
 
-        # ── 2. Patch _get_csrf_token() to use a valid page ────────────────────
+        # ── 2. Patch _get_csrf_token() to fetch a page that has the token ─────
         Glassdoor._get_csrf_token = _patched_get_csrf_token
 
-        # ── 3. Patch _fetch_jobs_page() to tolerate partial SEO errors ────────
+        # ── 3. Patch _fetch_jobs_page() ───────────────────────────────────────
+        #   a) Fix authority/origin/referer headers to match actual domain
+        #      (glassdoor.ca vs .com — mismatched origin → API errors)
+        #   b) Tolerate partial SEO errors (only fail if job data is absent)
         def _patched_fetch_jobs_page(self, scraper_input, location_id, location_type, page_num, cursor):
             from jobspy.exception import GlassdoorException
-            import requests  # only for exception type check
 
             jobs = []
             try:
+                # Fix headers to match the actual domain before every POST.
+                # JobSpy's constant.py hardcodes authority/origin/referer to
+                # www.glassdoor.com — Canadian IPs use glassdoor.ca, causing
+                # the API to reject requests with "Error encountered in API response".
+                base = getattr(self, "base_url", "https://www.glassdoor.com").rstrip("/")
+                parsed = urlparse(base)
+                self.session.headers.update({
+                    "authority": parsed.netloc,
+                    "origin":    f"{parsed.scheme}://{parsed.netloc}",
+                    "referer":   f"{parsed.scheme}://{parsed.netloc}/",
+                })
+
                 payload = self._add_payload(location_id, location_type, page_num, cursor)
                 response = self.session.post(
-                    f"{self.base_url}/graph",
+                    f"{base}/graph",
                     timeout_seconds=20,
                     data=payload,
                 )
@@ -135,7 +159,8 @@ def apply_glassdoor_patch() -> bool:
                         .get("jobListings")
                     )
                     if not job_data:
-                        raise ValueError("Error encountered in API response (no job data)")
+                        err_msg = res_json["errors"][0].get("message", "unknown") if res_json["errors"] else "unknown"
+                        raise ValueError(f"Error encountered in API response: {err_msg}")
                     logger.debug(
                         "[glassdoor_patch] partial API errors but %d jobs present — continuing",
                         len(job_data),
@@ -171,7 +196,7 @@ def apply_glassdoor_patch() -> bool:
         Glassdoor._fetch_jobs_page = _patched_fetch_jobs_page
 
         _patched = True
-        logger.info("[glassdoor_patch] Glassdoor patched (curl_cffi + partial-error tolerance)")
+        logger.info("[glassdoor_patch] Glassdoor patched (curl_cffi + domain header fix + partial-error tolerance)")
         return True
 
     except Exception as e:

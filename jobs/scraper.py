@@ -92,6 +92,11 @@ async def scrape_for_user(user, role_variants: list[str] | None = None) -> list[
                 )
                 if loc:
                     kwargs["location"] = loc
+                elif country:
+                    # No specific location set — use country as location so Glassdoor
+                    # resolves the correct country-level location ID instead of
+                    # defaulting to US nationwide (hardcoded ID 11047).
+                    kwargs["location"] = country
                 if country:
                     kwargs["country_indeed"] = country
 
