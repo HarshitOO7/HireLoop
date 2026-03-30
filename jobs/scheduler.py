@@ -6,7 +6,8 @@ Schedule:
   - 18:00 daily  → evening scrape (all users)
 
 Each cycle:
-  scrape → filter → parse_job → analyze_fit → send job card to Telegram → save to DB
+  scrape → filter → parse_job → analyze_fit → send first job card to Telegram → save to DB
+  After user acts on a card, send_next_pending_card() delivers the next one.
 """
 
 import asyncio
@@ -120,12 +121,18 @@ async def _get_role_variants(user: User, ai) -> list[str]:
     return variants
 
 
-async def _process_user(user: User, bot, ai) -> int:
+async def _process_user(user: User, bot, ai, is_manual: bool = False) -> int:
     logger.info("[scheduler] processing user=%s", user.telegram_id)
 
     role_variants = await _get_role_variants(user, ai)
     raw_jobs = await scrape_for_user(user, role_variants=role_variants or None)
+
     if not raw_jobs:
+        if is_manual:
+            await bot.send_message(
+                chat_id=user.telegram_id,
+                text="Done searching — no listings found. Try adjusting your search terms with 🎛️ Edit Filters.",
+            )
         return 0
 
     async with AsyncSessionLocal() as session:
@@ -142,68 +149,84 @@ async def _process_user(user: User, bot, ai) -> int:
         hours_old=hours_old,
     )
 
-    # Send summary before cards
-    await bot.send_message(
-        chat_id=user.telegram_id,
-        text=(
-            f"🔍 *Job search complete*\n\n"
-            f"• Scraped: {len(raw_jobs)} raw listings\n"
-            f"• After dedup/filters: {len(filtered)}\n"
-            f"• Analyzing top {min(len(filtered), 10)} for fit...\n\n"
-            f"_Cards incoming one by one_ 👇"
-        ),
-        parse_mode="Markdown",
-    )
-
     if not filtered:
+        if is_manual:
+            await bot.send_message(
+                chat_id=user.telegram_id,
+                text="Done — no new listings found (all already seen). I'll check again next cycle.",
+            )
         logger.info("[scheduler] no new jobs after filtering for user=%s", user.telegram_id)
         return 0
 
-    notified = 0
+    top = filtered[:10]
 
-    # Build keyword set from user skills for fast pre-filter
+    await bot.send_message(
+        chat_id=user.telegram_id,
+        text=f"🔍 Analyzing your top {len(top)} for fit...",
+    )
+
+    # Build skill keyword sets for fast pre-filter
     skill_keywords = {
         s["skill_name"].lower()
         for s in profile.get("skills", [])
         if s.get("status", "").startswith("verified_")
     }
-    # Also add short words (2+ chars) from each skill name for partial matching
     skill_tokens: set[str] = set()
     for sk in skill_keywords:
         skill_tokens.update(w for w in sk.split() if len(w) >= 2)
 
-    for raw in filtered[:10]:  # cap at 10 notifications per cycle
+    # Parallel AI analysis — max 3 concurrent to stay within rate limits
+    sem = asyncio.Semaphore(3)
+
+    async def _analyze_one(raw) -> tuple:
+        desc    = raw.get("description") or ""
+        job_url = raw.get("job_url") or raw.get("url") or ""
+        h       = raw.get("url_hash") or url_hash(job_url)
+
+        if skill_keywords or skill_tokens:
+            desc_lower = desc.lower()
+            has_overlap = (
+                any(kw in desc_lower for kw in skill_keywords)
+                or any(tok in desc_lower for tok in skill_tokens)
+            )
+            if not has_overlap:
+                logger.debug("[scheduler] keyword pre-filter: no skill overlap — skip (saves 2 AI calls)")
+                return (raw, None, None, h, "no_overlap")
+
+        async with sem:
+            try:
+                parsed = await ai.parse_job(desc)
+                fit    = await ai.analyze_fit(parsed, profile)
+                return (raw, parsed, fit, h, "ok")
+            except Exception as e:
+                logger.error("[scheduler] AI error on job: %s", e)
+                return (raw, None, None, h, "error")
+
+    results = await asyncio.gather(*[_analyze_one(raw) for raw in top])
+
+    # Save results to DB, collect qualifying jobs
+    qualifying: list[Job] = []
+
+    for raw, parsed, fit, h, analysis_status in results:
+        job_url = raw.get("job_url") or raw.get("url") or ""
+        desc    = raw.get("description") or ""
         try:
-            desc    = raw.get("description") or ""
-            job_url = raw.get("job_url") or raw.get("url") or ""
-            h       = raw.get("url_hash") or url_hash(job_url)
+            if analysis_status == "no_overlap":
+                async with AsyncSessionLocal() as session:
+                    async with session.begin():
+                        session.add(Job(
+                            id=str(uuid.uuid4()), user_id=user.id,
+                            title=raw.get("title") or "Unknown",
+                            company=raw.get("company") or "Unknown",
+                            url=job_url, url_hash=h,
+                            status="rejected", created_at=datetime.utcnow(),
+                        ))
+                continue
 
-            # Fast keyword pre-filter: skip AI entirely if no skill overlap.
-            # Save a minimal "rejected" row so re-fetches don't repeat this check.
-            if skill_keywords or skill_tokens:
-                desc_lower = desc.lower()
-                has_overlap = (
-                    any(kw in desc_lower for kw in skill_keywords)
-                    or any(tok in desc_lower for tok in skill_tokens)
-                )
-                if not has_overlap:
-                    logger.debug("[scheduler] keyword pre-filter: no skill overlap — skip (saves 2 AI calls)")
-                    async with AsyncSessionLocal() as session:
-                        async with session.begin():
-                            session.add(Job(
-                                id=str(uuid.uuid4()), user_id=user.id,
-                                title=raw.get("title") or "Unknown",
-                                company=raw.get("company") or "Unknown",
-                                url=job_url, url_hash=h,
-                                status="rejected", created_at=datetime.utcnow(),
-                            ))
-                    continue
+            if analysis_status == "error" or not parsed or not fit:
+                continue
 
-            parsed = await ai.parse_job(desc)
-            fit    = await ai.analyze_fit(parsed, profile)
-            score  = fit.get("fit_score", 0)
-
-            # Save even below-threshold jobs so re-fetches don't re-run AI on them.
+            score      = fit.get("fit_score", 0)
             job_status = "pending" if score >= user.min_fit_score else "rejected"
             job = Job(
                 id=str(uuid.uuid4()),
@@ -223,34 +246,94 @@ async def _process_user(user: User, bot, ai) -> int:
                 async with session.begin():
                     session.add(job)
 
-            if score < user.min_fit_score:
+            if score >= user.min_fit_score:
+                qualifying.append(job)
+            else:
                 logger.debug("[scheduler] score %d < threshold %d — saved as rejected", score, user.min_fit_score)
-                continue
-
-            card_text = _build_card_text(job, parsed, fit)
-            fallback_url = job_url or f"https://www.google.com/search?q={job.title.replace(' ', '+')}"
-
-            await bot.send_message(
-                chat_id=user.telegram_id,
-                text=card_text,
-                parse_mode="Markdown",
-                reply_markup=job_card_keyboard(job.id, fallback_url),
-            )
-            notified += 1
-            await asyncio.sleep(1)  # pace cards — avoid flooding
 
         except Exception as e:
-            logger.error("[scheduler] error on job for user=%s: %s", user.telegram_id, e, exc_info=True)
+            logger.error("[scheduler] error saving job for user=%s: %s", user.telegram_id, e, exc_info=True)
             continue
 
-    if notified:
+    if not qualifying:
         await bot.send_message(
             chat_id=user.telegram_id,
-            text=f"✅ Done — {notified} job{'s' if notified != 1 else ''} above your {user.min_fit_score}% threshold. Use 📋 Pending Jobs to review anytime.",
+            text=f"No new jobs above your {user.min_fit_score}% threshold this time. Try 🎛️ Edit Filters to lower it.",
         )
+        logger.info("[scheduler] no qualifying jobs for user=%s", user.telegram_id)
+        return 0
 
-    logger.info("[scheduler] done — user=%s  notified=%d", user.telegram_id, notified)
-    return notified
+    # Sort best-fit first
+    qualifying.sort(key=lambda j: j.fit_score or 0, reverse=True)
+    count = len(qualifying)
+
+    await bot.send_message(
+        chat_id=user.telegram_id,
+        text=(
+            f"✅ *{count} job{'s' if count != 1 else ''}* match your {user.min_fit_score}%+ criteria!\n\n"
+            f"Act on each card and the next one follows automatically 👇"
+        ),
+        parse_mode="Markdown",
+    )
+
+    # Send ONLY the first card — the rest stay as "pending" in DB.
+    # After the user acts on this card, send_next_pending_card() delivers the next one.
+    first     = qualifying[0]
+    first_fit = (first.parsed or {}).get("_fit", {})
+    card_text = _build_card_text(first, first.parsed or {}, first_fit)
+    fallback  = first.url or f"https://www.google.com/search?q={first.title.replace(' ', '+')}"
+
+    await bot.send_message(
+        chat_id=user.telegram_id,
+        text=card_text,
+        parse_mode="Markdown",
+        reply_markup=job_card_keyboard(first.id, fallback),
+    )
+
+    logger.info("[scheduler] done — user=%s  queued %d jobs, sent first card", user.telegram_id, count)
+    return count
+
+
+async def send_next_pending_card(telegram_id: str, bot) -> bool:
+    """
+    Find the next pending job for this user and send a card.
+    Called after the user acts on a job card (skip or resume delivered).
+    Returns True if a card was sent, False if the queue is empty.
+    """
+    async with AsyncSessionLocal() as session:
+        user_result = await session.execute(
+            select(User).where(User.telegram_id == str(telegram_id))
+        )
+        user = user_result.scalar_one_or_none()
+        if not user:
+            return False
+
+        job_result = await session.execute(
+            select(Job)
+            .where(Job.user_id == user.id, Job.status == "pending")
+            .order_by(Job.fit_score.desc(), Job.created_at.asc())
+            .limit(1)
+        )
+        job = job_result.scalar_one_or_none()
+
+    if not job:
+        await bot.send_message(
+            chat_id=telegram_id,
+            text="✅ All caught up — no more pending jobs!\n\nI'll notify you at the next scheduled search, or tap 🔍 Fetch Jobs anytime.",
+        )
+        return False
+
+    fit       = (job.parsed or {}).get("_fit", {})
+    card_text = _build_card_text(job, job.parsed or {}, fit)
+    fallback  = job.url or f"https://www.google.com/search?q={job.title.replace(' ', '+')}"
+
+    await bot.send_message(
+        chat_id=telegram_id,
+        text=card_text,
+        parse_mode="Markdown",
+        reply_markup=job_card_keyboard(job.id, fallback),
+    )
+    return True
 
 
 # ── Cleanup ──────────────────────────────────────────────────────────────────
@@ -276,7 +359,7 @@ async def _purge_old_jobs(days: int = 10) -> int:
 
 async def run_scrape_cycle(bot, ai, telegram_id: str | None = None) -> int:
     """
-    Entry point called by APScheduler or /fetchnow.
+    Entry point called by APScheduler or manual fetch.
     Pass telegram_id to run for a single user only.
     Returns total jobs notified across all processed users.
     """
@@ -295,13 +378,14 @@ async def run_scrape_cycle(bot, ai, telegram_id: str | None = None) -> int:
     if not telegram_id:  # only purge on full scheduled cycles, not manual fetches
         await _purge_old_jobs(days=10)
 
+    is_manual = telegram_id is not None
     total = 0
     for user in users:
         if (user.filters or {}).get("paused"):
             logger.info("[scheduler] skipping paused user=%s", user.telegram_id)
             continue
         try:
-            n = await _process_user(user, bot, ai)
+            n = await _process_user(user, bot, ai, is_manual=is_manual)
             total += n or 0
         except Exception as e:
             logger.error("[scheduler] unhandled error for user=%s: %s", user.telegram_id, e, exc_info=True)

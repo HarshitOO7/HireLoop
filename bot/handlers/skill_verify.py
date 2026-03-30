@@ -183,9 +183,11 @@ async def handle_verify_context(update: Update, context: ContextTypes.DEFAULT_TY
 
 # ── Standalone job card callbacks ────────────────────────────────────────────
 
-async def _do_skip_job(query, job_id: str) -> None:
-    """Shared logic: mark a job as skipped regardless of callback prefix."""
+async def _do_skip_job(query, job_id: str, telegram_id: str, bot) -> None:
+    """Shared logic: mark a job as skipped and queue the next pending card."""
     from sqlalchemy import select
+    from jobs.scheduler import send_next_pending_card
+
     async with AsyncSessionLocal() as session:
         async with session.begin():
             result = await session.execute(select(Job).where(Job.id == job_id))
@@ -193,6 +195,7 @@ async def _do_skip_job(query, job_id: str) -> None:
             if job:
                 job.status = "skipped"
     await query.edit_message_text("Job skipped.")
+    await send_next_pending_card(telegram_id, bot)
 
 
 async def job_skip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -200,7 +203,7 @@ async def job_skip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query  = update.callback_query
     await query.answer()
     job_id = query.data.split("job_skip_", 1)[1]
-    await _do_skip_job(query, job_id)
+    await _do_skip_job(query, job_id, str(update.effective_user.id), context.bot)
 
 
 async def job_skip_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -208,7 +211,7 @@ async def job_skip_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     query  = update.callback_query
     await query.answer()
     job_id = query.data.split("skip_job_", 1)[1]
-    await _do_skip_job(query, job_id)
+    await _do_skip_job(query, job_id, str(update.effective_user.id), context.bot)
 
 
 async def job_generate_anyway(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

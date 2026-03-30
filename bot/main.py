@@ -6,6 +6,7 @@ Run with:
     (from project root with .venv active)
 """
 
+import asyncio
 import logging
 import os
 import sys
@@ -63,18 +64,40 @@ logger = logging.getLogger(__name__)
 
 async def cmd_fetch_now(update: Update, context) -> None:
     """Trigger an immediate scrape for the calling user."""
+    from sqlalchemy import select, func
+    from db.models import Job, User as UserModel
+    from db.session import AsyncSessionLocal
+
     tg_id = str(update.effective_user.id)
-    msg = await update.message.reply_text("Searching for jobs now... this may take a minute.")
-    ai = context.application.bot_data["ai"]
-    try:
-        notified = await run_scrape_cycle(context.bot, ai, telegram_id=tg_id)
-        if notified:
-            await msg.edit_text(f"Done! Found {notified} new job{'s' if notified != 1 else ''}.")
-        else:
-            await msg.edit_text("Done! No new jobs right now. Try again later or adjust your filters with 🎛️ Edit Filters.")
-    except Exception as e:
-        logger.error("fetchnow error for user=%s: %s", tg_id, e, exc_info=True)
-        await msg.edit_text("Something went wrong. Check the logs.")
+    ai    = context.application.bot_data["ai"]
+
+    # 1. Show pending count immediately so user can work on backlog while search runs
+    async with AsyncSessionLocal() as session:
+        u_result = await session.execute(
+            select(UserModel).where(UserModel.telegram_id == tg_id)
+        )
+        user_obj = u_result.scalar_one_or_none()
+        pending_count = 0
+        if user_obj:
+            cnt = await session.execute(
+                select(func.count()).select_from(Job).where(
+                    Job.user_id == user_obj.id, Job.status == "pending"
+                )
+            )
+            pending_count = cnt.scalar() or 0
+
+    if pending_count > 0:
+        await update.message.reply_text(
+            f"📋 You have *{pending_count}* pending job{'s' if pending_count != 1 else ''} from before — "
+            f"tap 📋 Pending Jobs to review them.\n\n"
+            f"🔍 Starting new search in the background...",
+            parse_mode="Markdown",
+        )
+    else:
+        await update.message.reply_text("🔍 Searching for new jobs in the background...")
+
+    # 2. Run scrape as a background task — sends its own messages when done
+    asyncio.create_task(run_scrape_cycle(context.bot, ai, telegram_id=tg_id))
 
 
 async def _handle_url_paste(update: Update, context, url: str) -> None:

@@ -24,11 +24,13 @@ import logging
 import tempfile
 from pathlib import Path
 
+from sqlalchemy import update as sa_update
 from telegram import Update
 from telegram.ext import CallbackQueryHandler, ContextTypes
 
 from db.models import Application, Job
 from db.session import AsyncSessionLocal
+from jobs.scheduler import send_next_pending_card
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +51,14 @@ async def _load_app(job_id: str) -> Application | None:
             select(Application).where(Application.job_id == job_id)
         )
         return result.scalar_one_or_none()
+
+
+async def _mark_job_approved(job_id: str) -> None:
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            await session.execute(
+                sa_update(Job).where(Job.id == job_id).values(status="approved")
+            )
 
 
 # ── File builders ─────────────────────────────────────────────────────────────
@@ -158,6 +168,8 @@ async def deliver_docx(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         if app.cover_letter_markdown:
             await _send_cover_letter(query.message.chat_id, job, app, context.bot)
         await query.message.reply_text("Done! Good luck with the application 🍀")
+        await _mark_job_approved(job_id)
+        await send_next_pending_card(str(update.effective_user.id), context.bot)
     except Exception as e:
         logger.error("[job_approval] docx delivery failed: %s", e)
         await query.message.reply_text("File send failed — try again.")
@@ -180,6 +192,8 @@ async def deliver_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         if app.cover_letter_markdown:
             await _send_cover_letter(query.message.chat_id, job, app, context.bot)
         await query.message.reply_text("Done! Good luck with the application 🍀")
+        await _mark_job_approved(job_id)
+        await send_next_pending_card(str(update.effective_user.id), context.bot)
     except Exception as e:
         logger.error("[job_approval] pdf delivery failed: %s", e)
         await query.message.reply_text("File send failed — try again.")
@@ -203,6 +217,8 @@ async def deliver_both(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         if app.cover_letter_markdown:
             await _send_cover_letter(query.message.chat_id, job, app, context.bot)
         await query.message.reply_text("Done! Good luck with the application 🍀")
+        await _mark_job_approved(job_id)
+        await send_next_pending_card(str(update.effective_user.id), context.bot)
     except Exception as e:
         logger.error("[job_approval] both delivery failed: %s", e)
         await query.message.reply_text("File send failed — try again.")
