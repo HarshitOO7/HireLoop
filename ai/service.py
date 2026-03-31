@@ -180,6 +180,50 @@ Return exactly 3 job search terms for use as job board keywords. Rules:
 Return a JSON array of exactly 3 strings:
 ["Title 1", "Title 2", "Title 3"]"""
 
+_PARSE_AND_FIT_SYSTEM = """You are a job parser and fit analyzer. Be conservative and honest. Never inflate scores.
+Return ONLY valid JSON. No preamble, no markdown fences, no explanation."""
+
+_PARSE_AND_FIT_PROMPT = """Parse this job description and analyze fit with the candidate in one pass.
+
+## Job Description
+{jd_text}
+
+## Candidate Skill Graph
+{skill_graph_json}
+
+## Resume Variants Available
+{variant_tags}
+
+Return this exact JSON structure:
+{{
+  "parsed": {{
+    "title": "...",
+    "company": "...",
+    "location": "...",
+    "salary_range": "... or null",
+    "remote": null,
+    "required_skills": ["skill"],
+    "preferred_skills": ["skill"],
+    "years_experience": null,
+    "seniority": "junior|mid|senior|lead|staff|null",
+    "requires_cover_letter": false,
+    "cover_letter_keywords": [],
+    "recruiter_name": null,
+    "recruiter_contact": null
+  }},
+  "fit": {{
+    "fit_score": 0,
+    "matched_skills": [],
+    "missing_required": [{{"skill": "...", "importance": "required|preferred|nice"}}],
+    "requires_cover_letter": false,
+    "best_resume_variant": "general",
+    "gap_summary": "2 sentence honest assessment",
+    "action": "apply|consider|skip",
+    "verify_questions": [],
+    "recruiter_info_found": null
+  }}
+}}"""
+
 _SCREENING_SYSTEM = "Answer screening questions honestly based on the candidate's verified experience."
 
 _SCREENING_PROMPT = """Answer these screening questions for a job application.
@@ -373,6 +417,39 @@ class HireLoopAI:
                     time.monotonic() - t0, len(result), result)
         cache.put("expand_roles", result, role_titles)
         return result
+
+    async def parse_and_analyze_fit(self, raw_jd_text: str, user_profile: dict) -> tuple[dict, dict]:
+        """
+        Parse a job description AND analyze fit in a single AI call.
+        Returns (parsed_job, fit_result) — same shapes as parse_job() and analyze_fit().
+        Use this in bulk-processing loops to halve the number of API calls.
+        """
+        logger.info("[parse_and_fit] START — jd %d chars  skills=%d",
+                    len(raw_jd_text), len(user_profile.get("skills", [])))
+        t0 = time.monotonic()
+        if cached := cache.get("parse_and_fit", raw_jd_text, user_profile):
+            logger.info("[parse_and_fit] CACHE HIT (%.2fs)", time.monotonic() - t0)
+            return cached["parsed"], cached["fit"]
+        slim_skills = [
+            {"skill": s["skill_name"], "status": s.get("status", ""), "conf": s.get("confidence", "")}
+            for s in user_profile.get("skills", [])
+        ]
+        prompt = _PARSE_AND_FIT_PROMPT.format(
+            jd_text=raw_jd_text,
+            skill_graph_json=_jc(slim_skills),
+            variant_tags=", ".join(user_profile.get("variant_tags", ["general"])),
+        )
+        logger.info("[parse_and_fit] sending to %s — prompt %d chars", self._fast.provider_name, len(prompt))
+        t_ai = time.monotonic()
+        raw = await self._fast.complete(prompt, system=_PARSE_AND_FIT_SYSTEM)
+        logger.info("[parse_and_fit] AI responded in %.2fs — raw %d chars", time.monotonic() - t_ai, len(raw))
+        result = _parse_json(raw)
+        parsed = result.get("parsed") or {}
+        fit    = result.get("fit") or {}
+        logger.info("[parse_and_fit] DONE %.2fs — title=%r  fit_score=%s  action=%r",
+                    time.monotonic() - t0, parsed.get("title"), fit.get("fit_score"), fit.get("action"))
+        cache.put("parse_and_fit", {"parsed": parsed, "fit": fit}, raw_jd_text, user_profile)
+        return parsed, fit
 
     async def answer_screening_questions(
         self, questions: list[str], job: dict, user_profile: dict

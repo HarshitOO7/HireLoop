@@ -121,6 +121,98 @@ async def _get_role_variants(user: User, ai) -> list[str]:
     return variants
 
 
+async def _save_job_result(
+    raw, parsed, fit, h, analysis_status,
+    user: User,
+    qualifying: list | None,
+) -> None:
+    """Persist one analysis result. Appends to qualifying list if it passes threshold."""
+    job_url = raw.get("job_url") or raw.get("url") or ""
+    desc    = raw.get("description") or ""
+    try:
+        if analysis_status == "no_overlap":
+            async with AsyncSessionLocal() as session:
+                async with session.begin():
+                    session.add(Job(
+                        id=str(uuid.uuid4()), user_id=user.id,
+                        title=raw.get("title") or "Unknown",
+                        company=raw.get("company") or "Unknown",
+                        url=job_url, url_hash=h,
+                        status="rejected", created_at=datetime.utcnow(),
+                    ))
+            return
+
+        if analysis_status == "error" or not parsed or not fit:
+            return
+
+        score      = fit.get("fit_score", 0)
+        job_status = "pending" if score >= user.min_fit_score else "rejected"
+        job = Job(
+            id=str(uuid.uuid4()),
+            user_id=user.id,
+            title=raw.get("title") or parsed.get("title") or "Unknown",
+            company=raw.get("company") or parsed.get("company") or "Unknown",
+            url=job_url,
+            url_hash=h,
+            raw_jd=desc[:10_000],
+            parsed={**parsed, "_fit": fit},
+            fit_score=score,
+            cover_letter_required=bool(parsed.get("requires_cover_letter")),
+            status=job_status,
+            created_at=datetime.utcnow(),
+        )
+        async with AsyncSessionLocal() as session:
+            async with session.begin():
+                session.add(job)
+
+        if qualifying is not None:
+            if score >= user.min_fit_score:
+                qualifying.append(job)
+            else:
+                logger.debug("[scheduler] score %d < threshold %d — rejected", score, user.min_fit_score)
+
+    except Exception as e:
+        logger.error("[scheduler] error saving job for user=%s: %s", user.telegram_id, e, exc_info=True)
+
+
+async def _analyze_remaining(
+    jobs: list,
+    user: User,
+    profile: dict,
+    skill_keywords: set,
+    skill_tokens: set,
+    ai,
+) -> None:
+    """Background task: analyze remaining batches silently and save to DB."""
+    sem   = asyncio.Semaphore(5)
+    BATCH = 5
+
+    async def _bg_one(raw) -> tuple:
+        desc    = raw.get("description") or ""
+        job_url = raw.get("job_url") or raw.get("url") or ""
+        h       = raw.get("url_hash") or url_hash(job_url)
+        if skill_keywords or skill_tokens:
+            desc_lower = desc.lower()
+            if not (any(kw in desc_lower for kw in skill_keywords)
+                    or any(tok in desc_lower for tok in skill_tokens)):
+                return (raw, None, None, h, "no_overlap")
+        async with sem:
+            try:
+                parsed, fit = await ai.parse_and_analyze_fit(desc, profile)
+                return (raw, parsed, fit, h, "ok")
+            except Exception as e:
+                logger.error("[scheduler] bg AI error: %s", e)
+                return (raw, None, None, h, "error")
+
+    for i in range(0, len(jobs), BATCH):
+        batch   = jobs[i:i + BATCH]
+        results = await asyncio.gather(*[_bg_one(raw) for raw in batch])
+        for result in results:
+            await _save_job_result(*result, user=user, qualifying=None)
+        logger.info("[scheduler] background batch %d–%d / %d done",
+                    i + 1, i + len(batch), len(jobs))
+
+
 async def _process_user(user: User, bot, ai, is_manual: bool = False) -> int:
     logger.info("[scheduler] processing user=%s", user.telegram_id)
 
@@ -158,11 +250,10 @@ async def _process_user(user: User, bot, ai, is_manual: bool = False) -> int:
         logger.info("[scheduler] no new jobs after filtering for user=%s", user.telegram_id)
         return 0
 
-    top = filtered[:10]
-
+    n_total = len(filtered)
     await bot.send_message(
         chat_id=user.telegram_id,
-        text=f"🔍 Analyzing your top {len(top)} for fit...",
+        text=f"🔍 {n_total} listing{'s' if n_total != 1 else ''} found — analyzing fit in batches of 5...",
     )
 
     # Build skill keyword sets for fast pre-filter
@@ -175,85 +266,36 @@ async def _process_user(user: User, bot, ai, is_manual: bool = False) -> int:
     for sk in skill_keywords:
         skill_tokens.update(w for w in sk.split() if len(w) >= 2)
 
-    # Parallel AI analysis — max 3 concurrent to stay within rate limits
-    sem = asyncio.Semaphore(3)
-
-    async def _analyze_one(raw) -> tuple:
+    async def _analyze_one(raw, sem) -> tuple:
         desc    = raw.get("description") or ""
         job_url = raw.get("job_url") or raw.get("url") or ""
         h       = raw.get("url_hash") or url_hash(job_url)
-
         if skill_keywords or skill_tokens:
             desc_lower = desc.lower()
-            has_overlap = (
-                any(kw in desc_lower for kw in skill_keywords)
-                or any(tok in desc_lower for tok in skill_tokens)
-            )
-            if not has_overlap:
-                logger.debug("[scheduler] keyword pre-filter: no skill overlap — skip (saves 2 AI calls)")
+            if not (any(kw in desc_lower for kw in skill_keywords)
+                    or any(tok in desc_lower for tok in skill_tokens)):
+                logger.debug("[scheduler] keyword pre-filter: no overlap — skip")
                 return (raw, None, None, h, "no_overlap")
-
         async with sem:
             try:
-                parsed = await ai.parse_job(desc)
-                fit    = await ai.analyze_fit(parsed, profile)
+                parsed, fit = await ai.parse_and_analyze_fit(desc, profile)
                 return (raw, parsed, fit, h, "ok")
             except Exception as e:
                 logger.error("[scheduler] AI error on job: %s", e)
                 return (raw, None, None, h, "error")
 
-    results = await asyncio.gather(*[_analyze_one(raw) for raw in top])
-
-    # Save results to DB, collect qualifying jobs
+    # ── Foreground: process batches of 5 until we have at least one match ────
+    sem_fg     = asyncio.Semaphore(5)
     qualifying: list[Job] = []
+    rest       = list(filtered)
 
-    for raw, parsed, fit, h, analysis_status in results:
-        job_url = raw.get("job_url") or raw.get("url") or ""
-        desc    = raw.get("description") or ""
-        try:
-            if analysis_status == "no_overlap":
-                async with AsyncSessionLocal() as session:
-                    async with session.begin():
-                        session.add(Job(
-                            id=str(uuid.uuid4()), user_id=user.id,
-                            title=raw.get("title") or "Unknown",
-                            company=raw.get("company") or "Unknown",
-                            url=job_url, url_hash=h,
-                            status="rejected", created_at=datetime.utcnow(),
-                        ))
-                continue
-
-            if analysis_status == "error" or not parsed or not fit:
-                continue
-
-            score      = fit.get("fit_score", 0)
-            job_status = "pending" if score >= user.min_fit_score else "rejected"
-            job = Job(
-                id=str(uuid.uuid4()),
-                user_id=user.id,
-                title=raw.get("title") or parsed.get("title") or "Unknown",
-                company=raw.get("company") or parsed.get("company") or "Unknown",
-                url=job_url,
-                url_hash=h,
-                raw_jd=desc[:10_000],
-                parsed={**parsed, "_fit": fit},
-                fit_score=score,
-                cover_letter_required=bool(parsed.get("requires_cover_letter")),
-                status=job_status,
-                created_at=datetime.utcnow(),
-            )
-            async with AsyncSessionLocal() as session:
-                async with session.begin():
-                    session.add(job)
-
-            if score >= user.min_fit_score:
-                qualifying.append(job)
-            else:
-                logger.debug("[scheduler] score %d < threshold %d — saved as rejected", score, user.min_fit_score)
-
-        except Exception as e:
-            logger.error("[scheduler] error saving job for user=%s: %s", user.telegram_id, e, exc_info=True)
-            continue
+    while rest and not qualifying:
+        batch = rest[:5]
+        rest  = rest[5:]
+        logger.info("[scheduler] foreground batch: %d jobs (%d remaining)", len(batch), len(rest))
+        results = await asyncio.gather(*[_analyze_one(raw, sem_fg) for raw in batch])
+        for result in results:
+            await _save_job_result(*result, user=user, qualifying=qualifying)
 
     if not qualifying:
         await bot.send_message(
@@ -263,21 +305,26 @@ async def _process_user(user: User, bot, ai, is_manual: bool = False) -> int:
         logger.info("[scheduler] no qualifying jobs for user=%s", user.telegram_id)
         return 0
 
-    # Sort best-fit first
+    # ── Fire background task for whatever is left ─────────────────────────────
+    if rest:
+        asyncio.create_task(
+            _analyze_remaining(rest, user, profile, skill_keywords, skill_tokens, ai)
+        )
+
+    # ── Send first-batch summary + first card ─────────────────────────────────
     qualifying.sort(key=lambda j: j.fit_score or 0, reverse=True)
     count = len(qualifying)
 
+    bg_note = f" — checking {len(rest)} more in the background" if rest else ""
     await bot.send_message(
         chat_id=user.telegram_id,
         text=(
-            f"✅ *{count} job{'s' if count != 1 else ''}* match your {user.min_fit_score}%+ criteria!\n\n"
+            f"✅ *{count} match{'es' if count != 1 else ''}* so far{bg_note}!\n\n"
             f"Act on each card and the next one follows automatically 👇"
         ),
         parse_mode="Markdown",
     )
 
-    # Send ONLY the first card — the rest stay as "pending" in DB.
-    # After the user acts on this card, send_next_pending_card() delivers the next one.
     first     = qualifying[0]
     first_fit = (first.parsed or {}).get("_fit", {})
     card_text = _build_card_text(first, first.parsed or {}, first_fit)
@@ -290,7 +337,8 @@ async def _process_user(user: User, bot, ai, is_manual: bool = False) -> int:
         reply_markup=job_card_keyboard(first.id, fallback),
     )
 
-    logger.info("[scheduler] done — user=%s  queued %d jobs, sent first card", user.telegram_id, count)
+    logger.info("[scheduler] foreground done — user=%s  %d match(es), %d still in background",
+                user.telegram_id, count, len(rest))
     return count
 
 
