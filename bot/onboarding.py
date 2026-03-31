@@ -25,6 +25,7 @@ import uuid
 from datetime import datetime
 
 from telegram import Update
+from telegram.error import BadRequest
 from telegram.ext import (
     CallbackQueryHandler,
     CommandHandler,
@@ -470,9 +471,14 @@ async def skill_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     query = update.callback_query
     await query.answer()
     idx = int(query.data.split("_")[-1])
+    if idx < context.user_data.get("pending_idx", 0):
+        return CONFIRM_SKILLS  # double-tap on already-processed button
     skill = context.user_data["pending_skills"][idx]
     context.user_data["confirmed_skills"].append({**skill, "status": "verified_resume", "user_context": skill.get("evidence", "")})
-    await query.edit_message_text(f"Confirmed: {skill['skill_name']} ✅")
+    try:
+        await query.edit_message_text(f"Confirmed: {skill['skill_name']} ✅")
+    except BadRequest:
+        pass
     context.user_data["pending_idx"] = idx + 1
     return await _show_next_pending_skill(update, context)
 
@@ -508,8 +514,13 @@ async def skill_removed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     query = update.callback_query
     await query.answer()
     idx = int(query.data.split("_")[-1])
+    if idx < context.user_data.get("pending_idx", 0):
+        return CONFIRM_SKILLS  # double-tap on already-processed button
     skill = context.user_data["pending_skills"][idx]
-    await query.edit_message_text(f"Removed: {skill['skill_name']}")
+    try:
+        await query.edit_message_text(f"Removed: {skill['skill_name']}")
+    except BadRequest:
+        pass
     context.user_data["pending_idx"] = idx + 1
     return await _show_next_pending_skill(update, context)
 
@@ -527,7 +538,10 @@ async def skill_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     ]
 
     context.user_data["pending_idx"] = idx - 1
-    await query.edit_message_text(f"Going back to {prev_skill['skill_name']}...")
+    try:
+        await query.edit_message_text(f"Going back to {prev_skill['skill_name']}...")
+    except BadRequest:
+        pass
     return await _show_next_pending_skill(update, context)
 
 
@@ -700,13 +714,9 @@ async def skip_blacklist(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def _ask_years_exp(msg) -> int:
     await msg.reply_text(
         "How many years of experience do you have?\n\n"
-        "Pick a preset or type your own range.\n\n"
-        "Accepted formats:\n"
-        "  • `< 4`  — less than 4 years\n"
-        "  • `2-5`  — between 2 and 5 years\n"
-        "  • `3+`   — 3 or more years\n"
-        "  • `any`  — no filter\n\n"
-        "Jobs that clearly require more years than your range will be filtered out.",
+        "Type a number or range, or tap Any.\n\n"
+        "Examples: `5` · `3+` · `2-5` · `< 4` · `any`\n\n"
+        "Jobs that clearly require more than your range will be filtered out.",
         parse_mode="Markdown",
         reply_markup=years_exp_keyboard(),
     )
@@ -716,15 +726,11 @@ async def _ask_years_exp(msg) -> int:
 # ── State: SET_YEARS_EXP ────────────────────────────────────────────────────
 
 _YEARS_PRESET_MAP = {
-    "yrs_lt2":   "< 2",
-    "yrs_lt4":   "< 4",
-    "yrs_2to5":  "2-5",
-    "yrs_5plus": "5+",
-    "yrs_any":   "any",
+    "yrs_any": "any",
 }
 
 _YEARS_VALID_RE = re.compile(
-    r"^(?:any|none|<\s*\d+|<=\s*\d+|\d+\s*[-–to]+\s*\d+|\d+\s*\+)$",
+    r"^(?:any|none|<\s*\d+|<=\s*\d+|\d+\s*[-–to]+\s*\d+|\d+\s*\+|\d+)$",
     re.IGNORECASE,
 )
 
@@ -743,9 +749,8 @@ async def set_years_exp_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
     raw = update.message.text.strip()
     if not _YEARS_VALID_RE.match(raw):
         await update.message.reply_text(
-            "That format isn't recognised. Please use one of:\n\n"
-            "  `< 4`  `2-5`  `3+`  `any`\n\n"
-            "Or pick a preset below.",
+            "That format isn't recognised. Try something like:\n\n"
+            "`5`  `3+`  `2-5`  `< 4`  `any`",
             parse_mode="Markdown",
             reply_markup=years_exp_keyboard(),
         )

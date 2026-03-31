@@ -169,14 +169,16 @@ _EXPAND_ROLES_SYSTEM = """You are a job search expert. Return ONLY a valid JSON 
 _EXPAND_ROLES_PROMPT = """The user is targeting these job titles:
 {role_titles}
 
-Generate 6–8 common job title variations that job boards actually post. Rules:
-- Keep each title SHORT (2–4 words max) — used as search keywords
-- Cover seniority-neutral variants and adjacent titles
-- Include common abbreviations (e.g. "SWE", "MLE")
+Return exactly 3 job search terms for use as job board keywords. Rules:
+- Each term must cover DIFFERENT search space — no synonyms, no near-duplicates
+- If the input already contains a broad term (e.g. "Software Engineer"), do NOT add narrower variants of it (e.g. "Backend Engineer") — they are already covered
+- Prefer broader/more general titles over specific ones so one search catches more listings
+- Keep each title SHORT (2–4 words max)
+- No seniority prefixes (no Senior/Junior/Lead) — those are covered by the user's years filter
 - No descriptions, no explanations
 
-Return a JSON array:
-["Title 1", "Title 2", ...]"""
+Return a JSON array of exactly 3 strings:
+["Title 1", "Title 2", "Title 3"]"""
 
 _SCREENING_SYSTEM = "Answer screening questions honestly based on the candidate's verified experience."
 
