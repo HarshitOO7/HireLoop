@@ -175,3 +175,64 @@ async def generate_resume(
                 job_row.status = "approved"
 
     return app
+
+
+async def generate_cover_letter(
+    job_id: str,
+    user_id: str,
+    ai,
+) -> "Application | None":
+    """
+    Generate a cover letter for an existing Application row and persist it.
+    Returns the updated Application, or None on failure.
+    """
+    from sqlalchemy import select
+    from db.models import Application, Job, User
+    from db.session import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as session:
+        job_result = await session.execute(select(Job).where(Job.id == job_id))
+        job = job_result.scalar_one_or_none()
+        if not job:
+            logger.error("[generator] job %s not found for CL generation", job_id)
+            return None
+
+        user_result = await session.execute(select(User).where(User.id == user_id))
+        user = user_result.scalar_one_or_none()
+        if not user:
+            return None
+
+        app_result = await session.execute(
+            select(Application).where(Application.job_id == job_id)
+        )
+        app = app_result.scalar_one_or_none()
+        if not app:
+            logger.error("[generator] no Application row for job %s", job_id)
+            return None
+
+    fit = (job.parsed or {}).get("_fit", {})
+    user_profile = {
+        "name":   user.name or "",
+        "skills": [s["skill"] for s in (user.filters or {}).get("verified_skills", [])],
+        "role":   (user.filters or {}).get("role", ""),
+    }
+
+    try:
+        cover_letter_md = await ai.write_cover_letter(
+            job=job.parsed or {"title": job.title, "company": job.company},
+            user_profile=user_profile,
+            fit=fit,
+        )
+    except Exception as e:
+        logger.error("[generator] write_cover_letter failed: %s", e)
+        return None
+
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            app_row = await session.get(Application, app.id)
+            if app_row:
+                app_row.cover_letter_markdown = cover_letter_md
+
+    app.cover_letter_markdown = cover_letter_md
+    logger.info("[generator] cover letter generated — %d chars", len(cover_letter_md))
+    return app

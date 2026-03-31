@@ -150,6 +150,15 @@ def job_card_keyboard(job_id: str, job_url: str) -> InlineKeyboardMarkup:
     ])
 
 
+def cover_letter_ask_keyboard(job_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("Yes, generate it",  callback_data=f"cl_yes_{job_id}"),
+            InlineKeyboardButton("No thanks",         callback_data=f"cl_no_{job_id}"),
+        ],
+    ])
+
+
 def resume_delivery_keyboard(job_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [

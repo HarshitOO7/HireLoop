@@ -28,6 +28,7 @@ from sqlalchemy import update as sa_update
 from telegram import Update
 from telegram.ext import CallbackQueryHandler, ContextTypes
 
+from bot.keyboards import cover_letter_ask_keyboard, resume_delivery_keyboard
 from db.models import Application, Job
 from db.session import AsyncSessionLocal
 from jobs.scheduler import send_next_pending_card
@@ -100,6 +101,10 @@ async def _send_cover_letter(chat_id: int, job: Job, app: Application, bot) -> N
 
 # ── Generation entry point ────────────────────────────────────────────────────
 
+def _md(t: object) -> str:
+    return (str(t) if t else "").replace("\\", "\\\\").replace("_", "\\_").replace("*", "\\*").replace("`", "\\`").replace("[", "\\[")
+
+
 async def start_resume_generation(
     job_id:  str,
     user_id: str,
@@ -107,11 +112,10 @@ async def start_resume_generation(
     ai,               # HireLoopAI instance
 ) -> None:
     """
-    Generate resume for job_id and prompt user to choose a delivery format.
+    Generate resume for job_id, then ask about cover letter before showing delivery options.
     Called from skill_verify after all skill gaps are resolved (or when none exist).
     """
     from resume.generator import generate_resume
-    from bot.keyboards import resume_delivery_keyboard
 
     thinking = await msg.reply_text(
         "Generating your tailored resume — this takes ~30 seconds..."
@@ -133,17 +137,67 @@ async def start_resume_generation(
         return
 
     job = await _load_job(job_id)
-    title   = job.title   if job else "the job"
-    company = job.company if job else ""
+    title    = job.title   if job else "the job"
+    company  = job.company if job else ""
+    required = bool(job and job.cover_letter_required)
 
-    cl_note = "\n📝 Cover letter also ready — will be sent with the resume." if app.cover_letter_markdown else ""
-
-    def _md(t) -> str:
-        return (str(t) if t else "").replace("\\", "\\\\").replace("_", "\\_").replace("*", "\\*").replace("`", "\\`").replace("[", "\\[")
+    cl_prompt = (
+        "📝 This posting requires a cover letter. Want me to write one?"
+        if required else
+        "Want to add a cover letter? (not required, but can help)"
+    )
 
     await thinking.edit_text(
         f"✅ Resume ready for *{_md(title)}*{f' @ {_md(company)}' if company else ''}!\n\n"
+        f"{cl_prompt}",
+        parse_mode="Markdown",
+        reply_markup=cover_letter_ask_keyboard(job_id),
+    )
+
+
+# ── Cover letter prompt callbacks ────────────────────────────────────────────
+
+async def cl_yes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query  = update.callback_query
+    await query.answer()
+    job_id  = query.data.split("cl_yes_", 1)[1]
+    user_id = context.user_data.get("db_user_id")
+    ai      = context.bot_data.get("ai")
+
+    await query.edit_message_text("Writing your cover letter...")
+
+    from resume.generator import generate_cover_letter
+    try:
+        app = await generate_cover_letter(job_id, user_id, ai)
+    except Exception as e:
+        logger.error("[job_approval] generate_cover_letter raised: %s", e)
+        app = None
+
+    job = await _load_job(job_id)
+    title   = job.title   if job else "the job"
+    company = job.company if job else ""
+    cl_note = "\n📝 Cover letter ready — will be sent with the resume." if (app and app.cover_letter_markdown) else "\n⚠️ Cover letter generation failed — proceeding without one."
+
+    await query.edit_message_text(
+        f"✅ Resume ready for *{_md(title)}*{f' @ {_md(company)}' if company else ''}!\n\n"
         f"Pick a format:{cl_note}",
+        parse_mode="Markdown",
+        reply_markup=resume_delivery_keyboard(job_id),
+    )
+
+
+async def cl_no(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query  = update.callback_query
+    await query.answer()
+    job_id = query.data.split("cl_no_", 1)[1]
+
+    job = await _load_job(job_id)
+    title   = job.title   if job else "the job"
+    company = job.company if job else ""
+
+    await query.edit_message_text(
+        f"✅ Resume ready for *{_md(title)}*{f' @ {_md(company)}' if company else ''}!\n\n"
+        "Pick a format:",
         parse_mode="Markdown",
         reply_markup=resume_delivery_keyboard(job_id),
     )
@@ -228,6 +282,8 @@ async def deliver_both(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 def get_job_approval_handlers() -> list:
     return [
+        CallbackQueryHandler(cl_yes,       pattern=r"^cl_yes_"),
+        CallbackQueryHandler(cl_no,        pattern=r"^cl_no_"),
         CallbackQueryHandler(deliver_docx, pattern=r"^deliver_docx_"),
         CallbackQueryHandler(deliver_pdf,  pattern=r"^deliver_pdf_"),
         CallbackQueryHandler(deliver_both, pattern=r"^deliver_both_"),
