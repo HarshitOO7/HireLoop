@@ -1,5 +1,5 @@
 """
-Resume PDF exporter — matches Harshit Bedi resume format exactly.
+Resume PDF exporter — generic ATS resume format.
 
 Layout:
   - Centered bold name (large)
@@ -12,7 +12,7 @@ Layout:
 
 Usage:
     from resume.pdf_export import render_pdf
-    path = render_pdf(markdown_text, output_path="resume/output/harshit_tailored.pdf")
+    path = render_pdf(markdown_text, output_path="resume/output/test_render.pdf")
 """
 
 import re
@@ -173,6 +173,43 @@ def _apply_inline(text: str) -> str:
     return text
 
 
+_URL_DISPLAY_RL: dict[str, str] = {
+    "linkedin.com": "LinkedIn",
+    "github.com":   "GitHub",
+    "behance.net":  "Behance",
+    "dribbble.com": "Dribbble",
+    "kaggle.com":   "Kaggle",
+}
+
+_RE_URL_RL = re.compile(r"(https?://)?(([\w\-]+\.)+[\w]{2,})(/[\w\-./%~:@!$&'()*+,;=?#]*)?")
+
+
+def _url_display_rl(url: str) -> str:
+    """Return a short display label for a URL."""
+    clean = re.sub(r"^https?://", "", url).lstrip("www.")
+    for domain, label in _URL_DISPLAY_RL.items():
+        if clean.startswith(domain):
+            return label
+    return clean.split("/")[0]
+
+
+def _contact_line_to_rl(line: str) -> str:
+    """
+    Convert a contact line (phone | email | linkedin.com/... | github.com/...) to
+    ReportLab XML with clickable <a href> links for URL tokens.
+    """
+    parts = []
+    for token in line.split("|"):
+        token = token.strip()
+        if _RE_URL_RL.fullmatch(token):
+            href = token if token.startswith("http") else "https://" + token
+            display = _escape(_url_display_rl(token))
+            parts.append(f'<a href="{href}" color="black">{display}</a>')
+        else:
+            parts.append(_escape(token))
+    return " | ".join(parts)
+
+
 def _parse_markdown(md: str, styles: dict, page_width: float) -> list:
     """Parse the resume markdown into a list of reportlab Flowables."""
     flowables = []
@@ -191,7 +228,7 @@ def _parse_markdown(md: str, styles: dict, page_width: float) -> list:
 
         # ── Contact line (line after name, before any ##) ─────────────────
         if i == 1 and not line.startswith("#"):
-            flowables.append(Paragraph(_escape(line), styles["contact"]))
+            flowables.append(Paragraph(_contact_line_to_rl(line), styles["contact"]))
             i += 1
             continue
 
@@ -283,9 +320,9 @@ if __name__ == "__main__":
     import sys
     from pathlib import Path
 
-    template = Path("resume/variants/harshit_base.md")
+    template = Path("resume/variants/base_template.md")
     if not template.exists():
-        print("No base template found at resume/variants/harshit_base.md")
+        print("No base template found at resume/variants/base_template.md")
         sys.exit(1)
 
     md = template.read_text(encoding="utf-8")

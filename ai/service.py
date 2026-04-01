@@ -126,7 +126,11 @@ HARD RULES:
 - Never invent accomplishments — use STAR format for all bullets
 - Mirror JD keywords for ATS optimization (do not keyword-stuff)
 - Max 1 page under 5yr experience, 2 pages for 5yr+
-- If cover letter required: append after ---COVER LETTER--- separator"""
+- If cover letter required: append after ---COVER LETTER--- separator
+- DO NOT output the candidate's name or contact line — start your output directly from the first ## section (e.g. ## SUMMARY)
+- Contact line rule: NO city, NO country, NO postal code — phone, email, and links only
+- GitHub link: only include if the candidate's resume already contains one AND the target role is technical (software/engineering/data/IT). Omit entirely for non-technical roles.
+- Links: write bare URLs (e.g. linkedin.com/in/username) — the renderer handles making them clickable"""
 
 _TAILOR_PROMPT = """Tailor this resume for the job.
 

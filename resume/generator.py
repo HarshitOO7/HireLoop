@@ -14,10 +14,59 @@ Called by:
   bot/handlers/job_approval.py  after skill verification is complete
 """
 
+import re
 import logging
 from datetime import datetime
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+# ── Contact extraction ─────────────────────────────────────────────────────────
+
+_RE_EMAIL    = re.compile(r"[\w.+-]+@[\w-]+\.[a-z]{2,}", re.IGNORECASE)
+_RE_PHONE    = re.compile(r"[\+]?[\d][\d\s\-\(\)]{6,14}[\d]")
+_RE_LINKEDIN = re.compile(r"linkedin\.com/in/[\w\-]+", re.IGNORECASE)
+_RE_GITHUB   = re.compile(r"github\.com/[\w\-]+", re.IGNORECASE)
+
+
+def _extract_contact(raw_text: str) -> dict:
+    """
+    Scan raw resume text for name and contact fields.
+    Returns dict with keys: name, phone, email, linkedin_url, github_url.
+    Any field may be None if not found.
+    """
+    lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
+    # Name: first non-empty line, strip markdown # prefix
+    name = lines[0].lstrip("# ").strip() if lines else None
+
+    email        = m.group(0) if (m := _RE_EMAIL.search(raw_text))    else None
+    phone        = m.group(0).strip() if (m := _RE_PHONE.search(raw_text)) else None
+    linkedin_url = m.group(0) if (m := _RE_LINKEDIN.search(raw_text)) else None
+    github_url   = m.group(0) if (m := _RE_GITHUB.search(raw_text))   else None
+
+    return {
+        "name":         name,
+        "phone":        phone,
+        "email":        email,
+        "linkedin_url": linkedin_url,
+        "github_url":   github_url,
+    }
+
+
+def _build_header(contact: dict, is_tech: bool) -> str:
+    """
+    Build the resume header markdown from extracted contact info.
+    No city. GitHub only for tech roles.
+    """
+    name = contact.get("name") or "Candidate"
+    tokens = [t for t in [
+        contact.get("phone"),
+        contact.get("email"),
+        contact.get("linkedin_url"),
+        contact.get("github_url") if is_tech else None,
+    ] if t]
+    contact_line = " | ".join(tokens)
+    return f"# {name}\n{contact_line}"
 
 
 async def generate_resume(
@@ -32,7 +81,7 @@ async def generate_resume(
     from sqlalchemy import select
     from db.models import Application, Job, SkillEvidence, SkillNode, User
     from db.session import AsyncSessionLocal
-    from resume.section_order import get_section_order
+    from resume.section_order import get_section_order, _domain_of
 
     async with AsyncSessionLocal() as session:
 
@@ -104,9 +153,20 @@ async def generate_resume(
         section_order = get_section_order(target_role, work_history)
         logger.info("[generator] section_order=%s", section_order)
 
-        # Inject section order hint into the base resume context
+        # ── Programmatic header (no AI) ────────────────────────────────────────
+        contact   = _extract_contact(user.base_resume_markdown)
+        is_tech   = _domain_of(target_role) == "tech"
+        header_md = _build_header(contact, is_tech)
+        logger.info("[generator] header built — name=%r  is_tech=%s", contact.get("name"), is_tech)
+
+        # ── Build base_resume context: template format + candidate content ─────
+        _template_path = Path(__file__).parent / "variants" / "base_template.md"
+        template_text  = _template_path.read_text(encoding="utf-8")
         base_resume = (
             f"<!-- preferred section order: {', '.join(section_order)} -->\n\n"
+            f"## FORMAT TEMPLATE (structure and section names only — do NOT copy this content):\n"
+            f"{template_text}\n\n"
+            f"## CANDIDATE'S UPLOADED RESUME (use this for actual content — skills, experience, bullets):\n"
             + user.base_resume_markdown
         )
 
@@ -144,6 +204,14 @@ async def generate_resume(
                 cover_letter_md = remainder.strip()
         elif "---CHANGES---" in resume_md:
             resume_md = resume_md.split("---CHANGES---", 1)[0].strip()
+
+        # ── Prepend programmatic header (AI output starts from first ## section) ─
+        # Strip any accidental name/contact line the AI may have included
+        body_lines = resume_md.splitlines()
+        # Drop leading lines until we hit the first ## section
+        while body_lines and not body_lines[0].startswith("## "):
+            body_lines.pop(0)
+        resume_md = header_md + "\n\n" + "\n".join(body_lines)
 
         logger.info(
             "[generator] resume=%d chars  cover_letter=%s",

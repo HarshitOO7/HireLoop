@@ -33,6 +33,7 @@ from docx.shared import Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
+from docx.opc.constants import RELATIONSHIP_TYPE as RT
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,78 @@ def _spacing(paragraph, before: int = 0, after: int = 2):
     fmt = paragraph.paragraph_format
     fmt.space_before = Pt(before)
     fmt.space_after  = Pt(after)
+
+
+# ── Contact line helpers ──────────────────────────────────────────────────────
+
+_URL_DISPLAY: dict[str, str] = {
+    "linkedin.com": "LinkedIn",
+    "github.com":   "GitHub",
+    "behance.net":  "Behance",
+    "dribbble.com": "Dribbble",
+    "kaggle.com":   "Kaggle",
+}
+
+_RE_URL = re.compile(r"(https?://)?(([\w\-]+\.)+[\w]{2,})(/[\w\-./%~:@!$&'()*+,;=?#]*)?")
+
+
+def _url_display_text(url: str) -> str:
+    """Return a short display label for a URL (e.g. 'LinkedIn', 'GitHub', or bare domain)."""
+    # Strip scheme for matching
+    clean = re.sub(r"^https?://", "", url).lstrip("www.")
+    for domain, label in _URL_DISPLAY.items():
+        if clean.startswith(domain):
+            return label
+    # Fallback: just the domain part
+    return clean.split("/")[0]
+
+
+def _add_hyperlink(paragraph, url: str, display_text: str, size: Pt = _BODY_PT) -> None:
+    """Add a clickable hyperlink run to a paragraph. No blue/underline styling — clean look."""
+    if not url.startswith("http"):
+        url = "https://" + url
+    r_id = paragraph.part.relate_to(url, RT.HYPERLINK, is_external=True)
+    hyperlink = OxmlElement("w:hyperlink")
+    hyperlink.set(qn("r:id"), r_id)
+    run_elem = OxmlElement("w:r")
+    rPr = OxmlElement("w:rPr")
+    # Suppress default hyperlink style (blue underline)
+    rStyle = OxmlElement("w:rStyle")
+    rStyle.set(qn("w:val"), "Hyperlink")
+    # Override color to auto (black) and remove underline
+    color = OxmlElement("w:color")
+    color.set(qn("w:val"), "auto")
+    u = OxmlElement("w:u")
+    u.set(qn("w:val"), "none")
+    sz = OxmlElement("w:sz")
+    sz.set(qn("w:val"), str(int(size.pt * 2)))
+    rPr.append(color)
+    rPr.append(u)
+    rPr.append(sz)
+    run_elem.append(rPr)
+    t = OxmlElement("w:t")
+    t.text = display_text
+    run_elem.append(t)
+    hyperlink.append(run_elem)
+    paragraph._p.append(hyperlink)
+
+
+def _add_contact_line(paragraph, line: str, size: Pt = _BODY_PT) -> None:
+    """
+    Render a contact line (phone | email | linkedin.com/... | github.com/...).
+    URL tokens become real DOCX hyperlinks with clean display text.
+    Plain tokens (phone, email) are plain runs.
+    """
+    tokens = [t.strip() for t in line.split("|")]
+    for i, token in enumerate(tokens):
+        if i > 0:
+            run = paragraph.add_run(" | ")
+            run.font.size = size
+        if _RE_URL.fullmatch(token.strip()):
+            _add_hyperlink(paragraph, token.strip(), _url_display_text(token.strip()), size)
+        else:
+            run = paragraph.add_run(token)
+            run.font.size = size
 
 
 # ── Inline markup parser ──────────────────────────────────────────────────────
@@ -171,7 +244,7 @@ def render_docx(markdown_text: str, output_path: str | Path) -> Path:
             p = doc.add_paragraph()
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER
             _spacing(p, before=0, after=4)
-            _add_inline(p, line)
+            _add_contact_line(p, line, size=_BODY_PT)
             continue
 
         # ── Everything else — inline parse (role lines, **Key:** val, etc.) ──
