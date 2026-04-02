@@ -56,12 +56,13 @@ async def _ask_next_gap(context: ContextTypes.DEFAULT_TYPE, msg) -> int:
     skill      = gaps[idx]["skill"]
     importance = gaps[idx].get("importance", "preferred")
     total      = len(gaps)
+    back_hint  = "  `back` to redo previous." if idx > 0 else ""
 
     await msg.reply_text(
         f"Gap {idx + 1} of {total}: *{skill}* ({importance})\n\n"
         "Have you used this professionally? One sentence — company, what you built, duration.\n\n"
         "_Example: Managed ICU ward at City Hospital for 18 months_ or _Built APIs at Acme Corp for 8 months_\n\n"
-        "Or type `skip` to pass.",
+        f"`skip` to pass.{back_hint}",
         parse_mode="Markdown",
     )
     return VERIFY_CONTEXT
@@ -111,10 +112,11 @@ async def job_skills_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await start_resume_generation(job_id, job.user_id, query.message, ai)
         return ConversationHandler.END
 
-    context.user_data["verify_job_id"]  = job_id
-    context.user_data["verify_user_id"] = job.user_id
-    context.user_data["verify_gaps"]    = gaps
-    context.user_data["verify_idx"]     = 0
+    context.user_data["verify_job_id"]      = job_id
+    context.user_data["verify_user_id"]     = job.user_id
+    context.user_data["verify_gaps"]        = gaps
+    context.user_data["verify_idx"]         = 0
+    context.user_data["verify_evidence_ids"] = []
 
     await query.edit_message_text(
         f"Found {len(gaps)} gap skill(s) to verify. I'll ask about each one.\n\n"
@@ -123,8 +125,23 @@ async def job_skills_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     return await _ask_next_gap(context, query.message)
 
 
+_MIN_CONTEXT_WORDS = 4  # reject responses that are too short to be meaningful
+
+
+def _looks_like_skip(text: str) -> bool:
+    """Fuzzy-match common skip typos: skip, skiip, skp, etc."""
+    t = text.lower().strip()
+    # Exact match
+    if t == "skip":
+        return True
+    # Close enough: starts with "sk" and ≤6 chars (catches skiip, skipp, skp, ski)
+    if t.startswith("sk") and len(t) <= 6:
+        return True
+    return False
+
+
 async def handle_verify_context(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """User typed their skill context (or 'skip')."""
+    """User typed their skill context (or 'skip' / 'back')."""
     text = update.message.text.strip()
     idx  = context.user_data.get("verify_idx", 0)
     gaps = context.user_data.get("verify_gaps", [])
@@ -135,48 +152,87 @@ async def handle_verify_context(update: Update, context: ContextTypes.DEFAULT_TY
     skill_name = gaps[idx]["skill"]
     job_id     = context.user_data.get("verify_job_id")
 
-    if text.lower() != "skip":
-        from sqlalchemy import select
-        async with AsyncSessionLocal() as session:
-            async with session.begin():
-                job_result = await session.execute(select(Job).where(Job.id == job_id))
-                job = job_result.scalar_one_or_none()
+    # ── Back ──────────────────────────────────────────────────────────────────
+    if text.lower() == "back":
+        if idx == 0:
+            await update.message.reply_text("You're already at the first skill.")
+            return VERIFY_CONTEXT
 
-                if job:
-                    node_result = await session.execute(
-                        select(SkillNode).where(
-                            SkillNode.user_id  == job.user_id,
-                            SkillNode.skill_name == skill_name,
-                        )
-                    )
-                    node = node_result.scalar_one_or_none()
+        # Delete the evidence saved for the previous gap (if any)
+        evidence_ids = context.user_data.get("verify_evidence_ids", [])
+        if evidence_ids:
+            prev_ev_id = evidence_ids.pop()
+            if prev_ev_id is not None:
+                async with AsyncSessionLocal() as session:
+                    async with session.begin():
+                        ev = await session.get(SkillEvidence, prev_ev_id)
+                        if ev:
+                            await session.delete(ev)
 
-                    if node:
-                        node.status     = "verified_attested"
-                        node.updated_at = datetime.utcnow()
-                    else:
-                        node = SkillNode(
-                            user_id    = job.user_id,
-                            skill_name = skill_name,
-                            status     = "verified_attested",
-                            confidence = "medium",
-                            created_at = datetime.utcnow(),
-                            updated_at = datetime.utcnow(),
-                        )
-                        session.add(node)
-                        await session.flush()
+        context.user_data["verify_idx"] = idx - 1
+        return await _ask_next_gap(context, update.message)
 
-                    session.add(SkillEvidence(
-                        skill_node_id = node.id,
-                        user_context  = text,
-                        source        = "telegram",
-                    ))
-
-        safe_name = skill_name.replace("_", "\\_").replace("*", "\\*").replace("`", "\\`")
-        await update.message.reply_text(f"Saved: *{safe_name}* ✅", parse_mode="Markdown")
-    else:
+    # ── Skip (fuzzy) ──────────────────────────────────────────────────────────
+    if _looks_like_skip(text):
+        context.user_data.setdefault("verify_evidence_ids", []).append(None)
         await update.message.reply_text(f"Skipped: {skill_name}")
+        context.user_data["verify_idx"] = idx + 1
+        return await _ask_next_gap(context, update.message)
 
+    # ── Guard: too short to be a real answer ──────────────────────────────────
+    if len(text.split()) < _MIN_CONTEXT_WORDS:
+        await update.message.reply_text(
+            "That's a bit short — give me one sentence with the company, what you did, and how long.\n\n"
+            "_Example: Built REST APIs at Acme Corp for 8 months_\n\n"
+            "Or type `skip` to pass this one.",
+            parse_mode="Markdown",
+        )
+        return VERIFY_CONTEXT
+
+    # ── Save evidence ─────────────────────────────────────────────────────────
+    from sqlalchemy import select
+    evidence_id = None
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            job_result = await session.execute(select(Job).where(Job.id == job_id))
+            job = job_result.scalar_one_or_none()
+
+            if job:
+                node_result = await session.execute(
+                    select(SkillNode).where(
+                        SkillNode.user_id    == job.user_id,
+                        SkillNode.skill_name == skill_name,
+                    )
+                )
+                node = node_result.scalar_one_or_none()
+
+                if node:
+                    node.status     = "verified_attested"
+                    node.updated_at = datetime.utcnow()
+                else:
+                    node = SkillNode(
+                        user_id    = job.user_id,
+                        skill_name = skill_name,
+                        status     = "verified_attested",
+                        confidence = "medium",
+                        created_at = datetime.utcnow(),
+                        updated_at = datetime.utcnow(),
+                    )
+                    session.add(node)
+                    await session.flush()
+
+                ev = SkillEvidence(
+                    skill_node_id = node.id,
+                    user_context  = text,
+                    source        = "telegram",
+                )
+                session.add(ev)
+                await session.flush()
+                evidence_id = ev.id
+
+    context.user_data.setdefault("verify_evidence_ids", []).append(evidence_id)
+    safe_name = skill_name.replace("_", "\\_").replace("*", "\\*").replace("`", "\\`")
+    await update.message.reply_text(f"Saved: *{safe_name}* ✅", parse_mode="Markdown")
     context.user_data["verify_idx"] = idx + 1
     return await _ask_next_gap(context, update.message)
 
@@ -254,9 +310,9 @@ async def job_full_jd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 # ── /jobs command ────────────────────────────────────────────────────────────
 
 async def cmd_pending_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """List the user's pending job cards."""
-    from sqlalchemy import select
-    from bot.keyboards import job_card_keyboard
+    """Send the next pending job card (one at a time)."""
+    from sqlalchemy import select, func
+    from jobs.scheduler import send_next_pending_card
 
     tg_id = str(update.effective_user.id)
 
@@ -270,45 +326,25 @@ async def cmd_pending_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             await update.message.reply_text("Run /start first to set up your profile.")
             return
 
-        jobs_result = await session.execute(
-            select(Job)
-            .where(Job.user_id == user.id, Job.status == "pending")
-            .order_by(Job.created_at.desc())
-            .limit(10)
+        cnt = await session.execute(
+            select(func.count()).select_from(Job).where(
+                Job.user_id == user.id, Job.status == "pending"
+            )
         )
-        pending = jobs_result.scalars().all()
+        pending_count = cnt.scalar() or 0
 
-    if not pending:
+    if pending_count == 0:
         await update.message.reply_text(
             "No pending jobs right now.\n\nThe bot scrapes at 08:00 and 18:00 daily."
         )
         return
 
-    await update.message.reply_text(f"You have {len(pending)} pending job(s):")
-
-    def _md(t) -> str:
-        return (str(t) if t else "").replace("\\", "\\\\").replace("_", "\\_").replace("*", "\\*").replace("`", "\\`").replace("[", "\\[")
-
-    for job in pending:
-        fit    = (job.parsed or {}).get("_fit", {})
-
-        matched = ", ".join(_md(s) for s in fit.get("matched_skills", [])[:4]) or "—"
-        gaps    = fit.get("missing_required", [])
-        gap_str = ", ".join(_md(g.get("skill", "?")) for g in gaps[:3]) if gaps else "None"
-
-        text = (
-            f"🏢 *{_md(job.title)}*\n"
-            f"{_md(job.company)}\n\n"
-            f"Fit Score: *{job.fit_score or 0:.0f}%*\n"
-            f"✅ Matched: {matched}\n"
-            f"❓ Gaps: {gap_str}"
-        )
-        fallback_url = job.url or "https://www.google.com"
-        await update.message.reply_text(
-            text,
-            parse_mode="Markdown",
-            reply_markup=job_card_keyboard(job.id, fallback_url),
-        )
+    await update.message.reply_text(
+        f"📋 *{pending_count}* pending job{'s' if pending_count != 1 else ''}. "
+        f"Act on each one and I'll send the next.",
+        parse_mode="Markdown",
+    )
+    await send_next_pending_card(tg_id, context.bot)
 
 
 # ── Handler builders ─────────────────────────────────────────────────────────

@@ -24,9 +24,31 @@ logger = logging.getLogger(__name__)
 # ── Contact extraction ─────────────────────────────────────────────────────────
 
 _RE_EMAIL    = re.compile(r"[\w.+-]+@[\w-]+\.[a-z]{2,}", re.IGNORECASE)
-_RE_PHONE    = re.compile(r"[\+]?[\d][\d\s\-\(\)]{6,14}[\d]")
+# Requires a full North-American phone structure (10+ digits) — rejects 8-digit IDs from URLs
+_RE_PHONE    = re.compile(
+    r"(?:\+?1[\s.\-]?)?"           # optional country code +1
+    r"(?:\(?\d{3}\)?[\s.\-]?)"     # area code
+    r"\d{3}[\s.\-]?\d{4}",         # 7-digit local
+)
 _RE_LINKEDIN = re.compile(r"linkedin\.com/in/[\w\-]+", re.IGNORECASE)
 _RE_GITHUB   = re.compile(r"github\.com/[\w\-]+", re.IGNORECASE)
+# Strip these domains before phone search so numeric profile IDs aren't matched as phones
+_RE_STRIP_URLS = re.compile(
+    r"https?://\S+|(?:linkedin|github|behance|dribbble|kaggle)\.com\S*",
+    re.IGNORECASE,
+)
+
+
+def _format_phone(raw: str) -> str | None:
+    """Normalize a raw phone string to (XXX) XXX-XXXX or +1 (XXX) XXX-XXXX."""
+    digits = re.sub(r"\D", "", raw)
+    if digits.startswith("1") and len(digits) == 11:
+        digits = digits[1:]          # strip country code, handle below
+    if len(digits) == 10:
+        return f"({digits[:3]}) {digits[3:6]}-{digits[6:]}"
+    if len(digits) > 10:
+        return raw                   # international — keep original
+    return None                      # too short to be a real phone number
 
 
 def _extract_contact(raw_text: str) -> dict:
@@ -36,13 +58,19 @@ def _extract_contact(raw_text: str) -> dict:
     Any field may be None if not found.
     """
     lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
-    # Name: first non-empty line, strip markdown # prefix
-    name = lines[0].lstrip("# ").strip() if lines else None
+    # Name: first non-empty line; strip markdown # prefix and any trailing | location
+    name_raw = lines[0].lstrip("# ").strip() if lines else None
+    name = name_raw.split("|")[0].strip() if name_raw else None
 
     email        = m.group(0) if (m := _RE_EMAIL.search(raw_text))    else None
-    phone        = m.group(0).strip() if (m := _RE_PHONE.search(raw_text)) else None
     linkedin_url = m.group(0) if (m := _RE_LINKEDIN.search(raw_text)) else None
     github_url   = m.group(0) if (m := _RE_GITHUB.search(raw_text))   else None
+
+    # Strip all URLs before scanning for phone — prevents matching numeric profile IDs
+    # (e.g. linkedin.com/in/aman-mishra-90192924 → "90192924" must not become the phone)
+    _no_urls = _RE_STRIP_URLS.sub(" ", raw_text)
+    _raw_phone = m.group(0).strip() if (m := _RE_PHONE.search(_no_urls)) else None
+    phone = _format_phone(_raw_phone) if _raw_phone else None
 
     return {
         "name":         name,
@@ -144,6 +172,33 @@ async def generate_resume(
                 note += ")"
             evidence_lines.append(note)
 
+        # ── Synthesize work history from skill evidence ────────────────────────
+        # Group all evidence by company so we can reconstruct jobs that may be
+        # absent from the uploaded base resume (e.g. added via skill verification)
+        _work_ev: dict[str, list] = {}
+        for ev in evidences:
+            if ev.company:
+                _work_ev.setdefault(ev.company, []).append(ev)
+
+        _synth_lines: list[str] = []
+        for company, evs in _work_ev.items():
+            role      = next((e.role_title     for e in evs if e.role_title),     None)
+            duration  = next((e.duration_months for e in evs if e.duration_months), None)
+            last_year = next((e.last_used_year  for e in evs if e.last_used_year),  None)
+            date_parts = [p for p in [
+                f"{duration}m" if duration else None,
+                str(last_year) if last_year else None,
+            ] if p]
+            role_line = f"**{role or 'Role'}**" + (f" | {', '.join(date_parts)}" if date_parts else "")
+            _synth_lines.append(role_line)
+            _synth_lines.append(f"*{company}*")
+            for ev in evs:
+                if ev.user_context:
+                    _synth_lines.append(f"- {ev.user_context}")
+            _synth_lines.append("")
+
+        skill_graph_work = "\n".join(_synth_lines).strip()
+
         verified_skills = [
             {"skill": n.skill_name, "status": n.status, "confidence": n.confidence}
             for n in skill_nodes
@@ -168,6 +223,12 @@ async def generate_resume(
             f"{template_text}\n\n"
             f"## CANDIDATE'S UPLOADED RESUME (use this for actual content — skills, experience, bullets):\n"
             + user.base_resume_markdown
+            + (
+                f"\n\n## ADDITIONAL WORK HISTORY FROM SKILL GRAPH"
+                f" (add these to WORK EXPERIENCE even if absent from the uploaded resume):\n"
+                + skill_graph_work
+                if skill_graph_work else ""
+            )
         )
 
         # ── Call AI ───────────────────────────────────────────────────────────

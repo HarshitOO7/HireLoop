@@ -40,7 +40,7 @@ from bot.handlers.job_approval import get_job_approval_handlers
 from bot.keyboards import MAIN_KEYBOARD
 from db.models import Base
 from db.session import engine
-from jobs.scheduler import build_scheduler, run_scrape_cycle, _get_user_profile, _build_card_text
+from jobs.scheduler import build_scheduler, run_scrape_cycle, _get_user_profile, _build_card_text, send_next_pending_card
 from jobs.parser import fetch_jd_from_url
 
 logging.basicConfig(
@@ -88,11 +88,11 @@ async def cmd_fetch_now(update: Update, context) -> None:
 
     if pending_count > 0:
         await update.message.reply_text(
-            f"📋 You have *{pending_count}* pending job{'s' if pending_count != 1 else ''} from before — "
-            f"tap 📋 Pending Jobs to review them.\n\n"
-            f"🔍 Starting new search in the background...",
+            f"📋 *{pending_count}* pending job{'s' if pending_count != 1 else ''} from before — here's the first one.\n\n"
+            f"🔍 Also starting a new search in the background...",
             parse_mode="Markdown",
         )
+        await send_next_pending_card(tg_id, context.bot)
     else:
         await update.message.reply_text("🔍 Searching for new jobs in the background...")
 

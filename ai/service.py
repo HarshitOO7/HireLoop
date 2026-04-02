@@ -125,7 +125,8 @@ HARD RULES:
 - Only include skills where status starts with "verified_" in the skill graph
 - Never invent accomplishments — use STAR format for all bullets
 - Mirror JD keywords for ATS optimization (do not keyword-stuff)
-- Max 1 page under 5yr experience, 2 pages for 5yr+
+- Max 1 page under 5yr experience, 2 pages for 5yr+ — but NEVER drop a work experience entry to fit; condense bullets instead
+- If "ADDITIONAL WORK HISTORY FROM SKILL GRAPH" is present in the context, include every company listed there as a WORK EXPERIENCE entry — the candidate verified this experience via the skill verification flow, it must appear even if absent from the uploaded resume
 - If cover letter required: append after ---COVER LETTER--- separator
 - DO NOT output the candidate's name or contact line — start your output directly from the first ## section (e.g. ## SUMMARY)
 - Contact line rule: NO city, NO country, NO postal code — phone, email, and links only
