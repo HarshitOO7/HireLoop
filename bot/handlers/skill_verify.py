@@ -118,8 +118,10 @@ async def job_skills_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     context.user_data["verify_idx"]         = 0
     context.user_data["verify_evidence_ids"] = []
 
+    gap_summary = (job.parsed or {}).get("_fit", {}).get("gap_summary", "")
+    intro = gap_summary if gap_summary else f"Found {len(gaps)} gap skill(s) to verify."
     await query.edit_message_text(
-        f"Found {len(gaps)} gap skill(s) to verify. I'll ask about each one.\n\n"
+        f"{intro}\n\n"
         "Your answers build your skill evidence graph — they'll auto-generate resume bullets later."
     )
     return await _ask_next_gap(context, query.message)

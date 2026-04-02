@@ -125,10 +125,10 @@ def add_skill_confirm_keyboard(idx: int) -> InlineKeyboardMarkup:
 # ── Persistent main keyboard (always visible) ──────────────────────────────
 
 MAIN_KEYBOARD = ReplyKeyboardMarkup([
-    ["📎 Add Resume",  "🎛️ Edit Filters"],
-    ["📊 My Skills",   "📋 Pending Jobs"],
-    ["🔍 Fetch Jobs",  "⚙️ Settings"],
-    ["⏸ Pause Agent"],
+    ["📎 Add Resume",       "🎛️ Edit Filters"],
+    ["📊 My Skills",        "📋 Pending Jobs"],
+    ["🔍 Fetch Jobs",       "📁 My Applications"],
+    ["⏸ Pause Agent",      "⚙️ Settings"],
 ], resize_keyboard=True)
 
 
@@ -181,3 +181,35 @@ def job_approval_keyboard(job_id: str) -> InlineKeyboardMarkup:
         ],
         [InlineKeyboardButton("📝 Add Cover Letter", callback_data=f"addcl_{job_id}")],
     ])
+
+
+def post_delivery_keyboard(job_id: str, job_url: str | None) -> InlineKeyboardMarkup:
+    """Keyboard shown after resume files are delivered."""
+    rows = [
+        [
+            InlineKeyboardButton("✅ Looks good",   callback_data=f"edit_done_{job_id}"),
+            InlineKeyboardButton("✏️ Edit resume",  callback_data=f"edit_resume_{job_id}"),
+        ],
+    ]
+    bottom = [InlineKeyboardButton("📄 Full JD", callback_data=f"job_fulljd_{job_id}")]
+    if job_url:
+        bottom.insert(0, InlineKeyboardButton("🔗 Apply Now", url=job_url))
+    rows.append(bottom)
+    return InlineKeyboardMarkup(rows)
+
+
+def application_card_keyboard(
+    app_id: int, job_id: str, job_url: str | None, has_cl: bool
+) -> InlineKeyboardMarkup:
+    """Per-application keyboard in My Applications history."""
+    rows = [[
+        InlineKeyboardButton("📄 Word",  callback_data=f"app_docx_{app_id}"),
+        InlineKeyboardButton("📋 PDF",   callback_data=f"app_pdf_{app_id}"),
+    ]]
+    if has_cl:
+        rows.append([InlineKeyboardButton("📝 Cover Letter", callback_data=f"app_cl_{app_id}")])
+    bottom = [InlineKeyboardButton("📄 Full JD", callback_data=f"job_fulljd_{job_id}")]
+    if job_url:
+        bottom.append(InlineKeyboardButton("🔗 Apply", url=job_url))
+    rows.append(bottom)
+    return InlineKeyboardMarkup(rows)

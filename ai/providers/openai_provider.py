@@ -20,7 +20,10 @@ class OpenAIProvider(AIProvider):
     def provider_name(self) -> str:
         return "openai"
 
-    async def complete(self, prompt: str, system: str = "") -> str:
+    async def complete(self, prompt: str, system: str = "", max_tokens: int | None = None) -> str:
+        kwargs = {}
+        if max_tokens:
+            kwargs["max_tokens"] = max_tokens
         logger.debug("[openai] → model=%s  prompt=%d chars  system=%d chars",
                      self._model, len(prompt), len(system))
         t0 = time.monotonic()
@@ -30,6 +33,7 @@ class OpenAIProvider(AIProvider):
                 {"role": "system", "content": system or "You are a helpful assistant."},
                 {"role": "user", "content": prompt},
             ],
+            **kwargs,
         )
         elapsed = time.monotonic() - t0
         text = response.choices[0].message.content
@@ -39,4 +43,33 @@ class OpenAIProvider(AIProvider):
                      getattr(usage, "prompt_tokens", "?"),
                      getattr(usage, "completion_tokens", "?"),
                      getattr(usage, "total_tokens", "?"))
+        return text
+
+    async def complete_json(
+        self,
+        prompt: str,
+        system: str = "",
+        schema: dict | None = None,
+        max_tokens: int | None = None,
+    ) -> str:
+        kwargs: dict = {"response_format": {"type": "json_object"}}
+        if max_tokens:
+            kwargs["max_tokens"] = max_tokens
+        logger.debug("[openai/json] → model=%s  prompt=%d chars", self._model, len(prompt))
+        t0 = time.monotonic()
+        response = await self._client.chat.completions.create(
+            model=self._model,
+            messages=[
+                {"role": "system", "content": system or "You are a helpful assistant."},
+                {"role": "user", "content": prompt},
+            ],
+            **kwargs,
+        )
+        elapsed = time.monotonic() - t0
+        text = response.choices[0].message.content
+        usage = response.usage
+        logger.debug("[openai/json] ← %.2fs  response=%d chars  tokens in=%s out=%s",
+                     elapsed, len(text),
+                     getattr(usage, "prompt_tokens", "?"),
+                     getattr(usage, "completion_tokens", "?"))
         return text

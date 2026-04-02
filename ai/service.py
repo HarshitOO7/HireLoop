@@ -40,84 +40,116 @@ def _slim_job(job: dict, keys: tuple) -> str:
     """Extract only the needed keys from a parsed job dict and return compact JSON."""
     return _jc({k: job[k] for k in keys if k in job})
 
+
+def _norm(text: str) -> str:
+    """Collapse all whitespace for stable cache keys."""
+    return " ".join(text.split())
+
+
+# ── Prompts ───────────────────────────────────────────────────────────────────
+
 _FIT_SYSTEM = """You are a job fit analyzer. Be conservative and honest. Never inflate scores.
+
+SCORING RULES:
+- A skill only counts as matched if the candidate's name for it closely matches the JD's name
+- Partial knowledge does not count as matched — when in doubt, put it in missing_required
+- Never return fit_score > 85 unless all required skills are matched
+- gap_summary must be honest — if fit_score < 60, say so plainly
+
 Return ONLY valid JSON. No preamble, no markdown fences, no explanation."""
 
 _FIT_PROMPT = """Analyze the fit between this job and candidate profile.
 
-## Job Description
+<job>
 {jd_text}
+</job>
 
-## Candidate Skill Graph
+<candidate_skills>
 {skill_graph_json}
+</candidate_skills>
 
-## Resume Variants Available
+<resume_variants>
 {variant_tags}
+</resume_variants>
 
 Return this exact JSON structure:
 {{
-  "fit_score": <0-100 integer>,
-  "matched_skills": ["skill_name"],
-  "missing_required": [{{"skill": "...", "importance": "required|preferred|nice"}}],
+  "fit_score": <integer 0-100>,
+  "matched_skills": [<string>],
+  "missing_required": [{{"skill": <string>, "importance": <"required"|"preferred"|"nice">}}],
   "requires_cover_letter": <true|false>,
-  "best_resume_variant": "<one of the variant_tags listed above>",
-  "gap_summary": "2 sentence honest assessment",
-  "action": "apply|consider|skip",
-  "verify_questions": ["Have you used X in production? Where?"],
-  "recruiter_info_found": "name/contact from JD, or null"
-}}"""
+  "best_resume_variant": <one of the resume_variants>,
+  "gap_summary": <2-sentence honest assessment>,
+  "action": <"apply"|"consider"|"skip">
+}}
+
+Return ONLY the JSON object. No text before or after the closing brace."""
 
 _PARSE_JOB_SYSTEM = """Extract structured information from job descriptions.
+
+EXTRACTION RULES:
+- Only extract information explicitly stated in the job description
+- If a field is not mentioned, return null — do NOT infer or guess
+- "hybrid" or "flexible" does not mean remote=true — only return true if explicitly stated
+
 Return ONLY valid JSON. No preamble, no markdown fences."""
 
 _PARSE_JOB_PROMPT = """Parse this job description into structured data.
 
+<job_description>
 {jd_text}
+</job_description>
 
 Return this exact JSON structure:
 {{
-  "title": "...",
-  "company": "...",
-  "location": "...",
-  "salary_range": "... or null",
+  "title": <string>,
+  "company": <string>,
+  "location": <string|null>,
+  "salary_range": <string|null>,
   "remote": <true|false|null>,
-  "required_skills": ["skill"],
-  "preferred_skills": ["skill"],
-  "years_experience": <integer or null>,
-  "seniority": "junior|mid|senior|lead|staff|null",
+  "required_skills": [<string>],
+  "preferred_skills": [<string>],
+  "years_experience": <integer|null>,
+  "seniority": <"junior"|"mid"|"senior"|"lead"|"staff"|null>,
   "requires_cover_letter": <true|false>,
-  "cover_letter_keywords": ["..."],
-  "recruiter_name": "... or null",
-  "recruiter_contact": "... or null"
-}}"""
+  "cover_letter_keywords": [<string>],
+  "recruiter_name": <string|null>,
+  "recruiter_contact": <string|null>
+}}
+
+Return ONLY the JSON object. No text before or after the closing brace."""
 
 _PARSE_RESUME_SYSTEM = """Extract skills and experience from resumes.
 Return ONLY valid JSON. No preamble, no markdown fences."""
 
 _PARSE_RESUME_PROMPT = """Parse this resume and extract all skills with confidence levels.
 
+<resume>
 {resume_text}
+</resume>
 
 Return this exact JSON structure:
 {{
-  "name": "...",
+  "name": <string>,
   "skills": [
     {{
-      "skill_name": "...",
-      "confidence": "high|medium|low",
-      "evidence": "brief note from resume"
+      "skill_name": <string>,
+      "confidence": <"high"|"medium"|"low">,
+      "evidence": <brief note from resume>
     }}
   ],
   "work_history": [
     {{
-      "company": "...",
-      "role": "...",
-      "duration_months": <integer>,
-      "last_used_year": <integer>
+      "company": <string>,
+      "role": <string>,
+      "duration_months": <integer|null>,
+      "last_used_year": <integer|null>
     }}
   ],
-  "variant_tags": ["general", "specialization_a", "specialization_b"]
-}}"""
+  "variant_tags": [<string>]
+}}
+
+Return ONLY the JSON object. No text before or after the closing brace."""
 
 _TAILOR_SYSTEM = """You are an expert resume writer. Tailor resumes truthfully using only verified evidence.
 
@@ -131,43 +163,80 @@ HARD RULES:
 - DO NOT output the candidate's name or contact line — start your output directly from the first ## section (e.g. ## SUMMARY)
 - Contact line rule: NO city, NO country, NO postal code — phone, email, and links only
 - GitHub link: only include if the candidate's resume already contains one AND the target role is technical (software/engineering/data/IT). Omit entirely for non-technical roles.
-- Links: write bare URLs (e.g. linkedin.com/in/username) — the renderer handles making them clickable"""
+- Links: write bare URLs (e.g. linkedin.com/in/username) — the renderer handles making them clickable
 
-_TAILOR_PROMPT = """Tailor this resume for the job.
+ANTI-HALLUCINATION RULES:
+- Every bullet must be traceable to either the base resume or the evidence notes
+- Never add a metric (%, $, number) that does not appear in the source material
+- Never add a technology, tool, or framework not present in verified_skills or the base resume
+- If you cannot write a strong bullet without inventing details, write a weaker honest bullet
+- "Led", "Architected", "Designed" — only use these if the source material uses them or clearly implies them
 
-## Base Resume ({variant_tag})
+For ADDITIONAL WORK HISTORY FROM SKILL GRAPH entries:
+- You have limited info — write 1-2 bullets max per company, strictly from what is provided
+- Do not expand or embellish the user's description
+- If duration is present, include it as the date range
+
+OUTPUT FORMAT (follow this section structure exactly):
+## SUMMARY
+## WORK EXPERIENCE
+**Role** | Date
+*Company*
+- bullet
+## SKILLS
+**Category:** skills
+## EDUCATION
+**Degree** | Year
+*Institution*
+## PROJECTS (tech roles only)
+**Name** | Year
+- bullet"""
+
+_TAILOR_PROMPT = """Tailor this resume for the job below.
+
+<resume variant="{variant_tag}">
 {base_resume_text}
+</resume>
 
-## Job Description
+<job>
 {jd_text}
+</job>
 
-## Verified Skill Graph (only use these)
+<verified_skills>
 {verified_skills_json}
+</verified_skills>
 
-## User Evidence Notes
+<evidence_notes>
 {user_evidence_text}
+</evidence_notes>
 
-## Cover Letter Required
-{requires_cl}
+Cover letter required: {requires_cl}
 
-Output the full tailored resume in Markdown.
-If cover letter required → append after ---COVER LETTER--- separator.
-Append ---CHANGES--- with 5 specific edits made and why."""
+Output the full tailored resume in Markdown starting from the first ## section.
+{cover_letter_instruction}"""
 
 _COVER_LETTER_SYSTEM = "You are an expert at writing compelling, honest cover letters."
 
 _COVER_LETTER_PROMPT = """Write a cover letter for this job application.
 
-## Job
+<job>
 {jd_text}
+</job>
 
-## Candidate Profile
+<candidate>
 {user_profile_json}
+</candidate>
 
-## Fit Analysis
+<fit>
 {fit_json}
+</fit>
 
-Write a professional, personalized cover letter. 3 paragraphs max. No fluff."""
+Write a professional cover letter. Exactly 3 paragraphs:
+1. Opening: why this specific role and company
+2. Body: 2-3 most relevant experiences/skills matched to the role requirements
+3. Close: enthusiasm + call to action
+
+250-350 words. No fluff. No "I am writing to apply for..." opener."""
 
 _EXPAND_ROLES_SYSTEM = """You are a job search expert. Return ONLY a valid JSON array of strings. No preamble, no markdown."""
 
@@ -186,67 +255,108 @@ Return a JSON array of exactly 3 strings:
 ["Title 1", "Title 2", "Title 3"]"""
 
 _PARSE_AND_FIT_SYSTEM = """You are a job parser and fit analyzer. Be conservative and honest. Never inflate scores.
+
+EXTRACTION RULES:
+- Only extract information explicitly stated in the job description
+- If a field is not mentioned, return null — do NOT infer or guess
+- "hybrid" or "flexible" does not mean remote=true — only return true if explicitly stated
+
+SCORING RULES:
+- A skill only counts as matched if the candidate's name for it closely matches the JD's name
+- Partial knowledge does not count as matched — when in doubt, put it in missing_required
+- Never return fit_score > 85 unless all required skills are matched
+- gap_summary must be honest — if fit_score < 60, say so plainly
+
 Return ONLY valid JSON. No preamble, no markdown fences, no explanation."""
 
 _PARSE_AND_FIT_PROMPT = """Parse this job description and analyze fit with the candidate in one pass.
 
-## Job Description
+<job_description>
 {jd_text}
+</job_description>
 
-## Candidate Skill Graph
+<candidate_skills>
 {skill_graph_json}
+</candidate_skills>
 
-## Resume Variants Available
+<resume_variants>
 {variant_tags}
+</resume_variants>
 
 Return this exact JSON structure:
 {{
   "parsed": {{
-    "title": "...",
-    "company": "...",
-    "location": "...",
-    "salary_range": "... or null",
-    "remote": null,
-    "required_skills": ["skill"],
-    "preferred_skills": ["skill"],
-    "years_experience": null,
-    "seniority": "junior|mid|senior|lead|staff|null",
-    "requires_cover_letter": false,
-    "cover_letter_keywords": [],
-    "recruiter_name": null,
-    "recruiter_contact": null
+    "title": <string>,
+    "company": <string>,
+    "location": <string|null>,
+    "salary_range": <string|null>,
+    "remote": <true|false|null>,
+    "required_skills": [<string>],
+    "preferred_skills": [<string>],
+    "years_experience": <integer|null>,
+    "seniority": <"junior"|"mid"|"senior"|"lead"|"staff"|null>,
+    "requires_cover_letter": <true|false>,
+    "cover_letter_keywords": [<string>],
+    "recruiter_name": <string|null>,
+    "recruiter_contact": <string|null>
   }},
   "fit": {{
-    "fit_score": 0,
-    "matched_skills": [],
-    "missing_required": [{{"skill": "...", "importance": "required|preferred|nice"}}],
-    "requires_cover_letter": false,
-    "best_resume_variant": "general",
-    "gap_summary": "2 sentence honest assessment",
-    "action": "apply|consider|skip",
-    "verify_questions": [],
-    "recruiter_info_found": null
+    "fit_score": <integer 0-100>,
+    "matched_skills": [<string>],
+    "missing_required": [{{"skill": <string>, "importance": <"required"|"preferred"|"nice">}}],
+    "requires_cover_letter": <true|false>,
+    "best_resume_variant": <one of the resume_variants>,
+    "gap_summary": <2-sentence honest assessment>,
+    "action": <"apply"|"consider"|"skip">
   }}
-}}"""
+}}
+
+Return ONLY the JSON object. No text before or after the closing brace."""
 
 _SCREENING_SYSTEM = "Answer screening questions honestly based on the candidate's verified experience."
 
 _SCREENING_PROMPT = """Answer these screening questions for a job application.
 
-## Questions
+<questions>
 {questions}
+</questions>
 
-## Job
+<job>
 {jd_text}
+</job>
 
-## Candidate Profile
+<candidate>
 {user_profile_json}
+</candidate>
 
-Return a JSON array: [{{"question": "...", "answer": "..."}}]"""
+Return a JSON array: [{{"question": <string>, "answer": <string>}}]
 
+Return ONLY the JSON array. No text before or after the closing bracket."""
+
+_PATCH_SYSTEM = """You are a precise resume editor. Apply only the requested change.
+
+RULES:
+- Output ONLY the sections you changed, each wrapped in <section name="SECTION NAME">...</section> tags
+- Do not output unchanged sections
+- Preserve all other formatting exactly
+- No invented content — only use what the candidate has verified
+- Never add metrics, technologies, or accomplishments not present in the original resume"""
+
+_PATCH_PROMPT = """<current_resume>
+{current_resume}
+</current_resume>
+
+<edit_request>
+{user_request}
+</edit_request>
+
+Output only the changed section(s) wrapped in <section name="..."> tags."""
+
+
+# ── Service ───────────────────────────────────────────────────────────────────
 
 class HireLoopAI:
-    """All 6 HireLoop AI tasks. Uses tiered providers:
+    """All HireLoop AI tasks. Uses tiered providers:
     - fast_provider: parse_job, parse_resume, analyze_fit (high volume)
     - quality_provider: tailor_resume, write_cover_letter, answer_screening_questions
     """
@@ -258,20 +368,21 @@ class HireLoopAI:
     async def parse_job(self, raw_jd_text: str) -> dict:
         logger.info("[parse_job] START — jd text %d chars", len(raw_jd_text))
         t0 = time.monotonic()
-        if cached := cache.get("parse_job", raw_jd_text):
+        norm = _norm(raw_jd_text)
+        if cached := cache.get("parse_job", norm):
             logger.info("[parse_job] CACHE HIT (%.2fs)", time.monotonic() - t0)
             return cached
-        prompt = _PARSE_JOB_PROMPT.format(jd_text=raw_jd_text)
+        prompt = _PARSE_JOB_PROMPT.format(jd_text=norm[:3000])
         logger.info("[parse_job] sending to %s — prompt %d chars", self._fast.provider_name, len(prompt))
         t_ai = time.monotonic()
-        raw = await self._fast.complete(prompt, system=_PARSE_JOB_SYSTEM)
+        raw = await self._fast.complete_json(prompt, system=_PARSE_JOB_SYSTEM, max_tokens=512)
         logger.info("[parse_job] AI responded in %.2fs — raw %d chars", time.monotonic() - t_ai, len(raw))
         result = _parse_json(raw)
-        logger.info("[parse_job] DONE %.2fs — title=%r company=%r fit=%s skills_req=%d",
+        logger.info("[parse_job] DONE %.2fs — title=%r company=%r skills_req=%d",
                     time.monotonic() - t0,
                     result.get("title"), result.get("company"),
-                    result.get("fit_score"), len(result.get("required_skills", [])))
-        cache.put("parse_job", result, raw_jd_text)
+                    len(result.get("required_skills", [])))
+        cache.put("parse_job", result, norm)
         return result
 
     async def parse_resume(self, resume_text: str) -> dict:
@@ -287,10 +398,9 @@ class HireLoopAI:
         logger.info("[parse_resume] prompt built — %d chars — sending to AI...", len(prompt))
 
         t_ai = time.monotonic()
-        raw = await self._fast.complete(prompt, system=_PARSE_RESUME_SYSTEM)
+        raw = await self._fast.complete_json(prompt, system=_PARSE_RESUME_SYSTEM, max_tokens=1000)
         logger.info("[parse_resume] AI responded in %.2fs — raw response length: %d chars", time.monotonic() - t_ai, len(raw))
 
-        logger.info("[parse_resume] parsing JSON response...")
         result = _parse_json(raw)
         skill_count = len(result.get("skills", []))
         logger.info("[parse_resume] DONE — extracted %d skills in %.2fs total", skill_count, time.monotonic() - t0)
@@ -307,10 +417,7 @@ class HireLoopAI:
         if cached := cache.get("analyze_fit", job, user_profile):
             logger.info("[analyze_fit] CACHE HIT (%.2fs)", time.monotonic() - t0)
             return cached
-        slim_skills = [
-            {"skill": s["skill_name"], "status": s.get("status", ""), "conf": s.get("confidence", "")}
-            for s in user_profile.get("skills", [])
-        ]
+        slim_skills = [s["skill_name"] for s in user_profile.get("skills", [])]
         prompt = _FIT_PROMPT.format(
             jd_text=_slim_job(job, ("title", "required_skills", "preferred_skills",
                                     "seniority", "years_experience", "cover_letter_required")),
@@ -319,7 +426,7 @@ class HireLoopAI:
         )
         logger.info("[analyze_fit] sending to %s — prompt %d chars", self._fast.provider_name, len(prompt))
         t_ai = time.monotonic()
-        raw = await self._fast.complete(prompt, system=_FIT_SYSTEM)
+        raw = await self._fast.complete_json(prompt, system=_FIT_SYSTEM, max_tokens=600)
         logger.info("[analyze_fit] AI responded in %.2fs — raw %d chars", time.monotonic() - t_ai, len(raw))
         result = _parse_json(raw)
         logger.info("[analyze_fit] DONE %.2fs — fit_score=%s  action=%r  matched=%d  missing_required=%d",
@@ -339,6 +446,12 @@ class HireLoopAI:
         user_evidence: str = "",
     ) -> str:
         variant = fit.get("best_resume_variant", "general")
+        requires_cl = bool(job.get("requires_cover_letter", False))
+        cover_letter_instruction = (
+            "Then append ---COVER LETTER--- followed by the cover letter."
+            if requires_cl else
+            "Do not include a cover letter."
+        )
         logger.info("[tailor_resume] START — job=%r  variant=%s  verified_skills=%d  base_resume=%d chars",
                     job.get("title", "?"), variant, len(verified_skills), len(base_resume))
         t0 = time.monotonic()
@@ -349,36 +462,32 @@ class HireLoopAI:
                                     "seniority", "years_experience", "cover_letter_keywords")),
             verified_skills_json=_jc(verified_skills),
             user_evidence_text=user_evidence or "None provided.",
-            requires_cl=str(job.get("requires_cover_letter", False)),
+            requires_cl="yes" if requires_cl else "no",
+            cover_letter_instruction=cover_letter_instruction,
         )
         logger.info("[tailor_resume] sending to %s (quality) — prompt %d chars",
                     self._quality.provider_name, len(prompt))
-        result = await self._quality.complete(prompt, system=_TAILOR_SYSTEM)
+        result = await self._quality.complete(prompt, system=_TAILOR_SYSTEM, max_tokens=3500)
         logger.info("[tailor_resume] DONE %.2fs — output %d chars", time.monotonic() - t0, len(result))
         return result
 
-    async def edit_resume(self, current_resume: str, instruction: str) -> str:
+    async def patch_resume(self, current_resume: str, user_request: str) -> str:
         """Apply a targeted edit to an already-generated resume.
 
-        Only changes what the instruction specifies — the rest of the resume
-        is preserved verbatim. Use this instead of tailor_resume() when the
-        user asks to change one line, reword a bullet, adjust a section, etc.
+        Returns only the changed section(s) wrapped in <section name="..."> tags.
+        Caller uses apply_patch() in resume/generator.py to splice back in.
         """
-        logger.info("[edit_resume] START — resume %d chars  instruction=%r",
-                    len(current_resume), instruction[:120])
+        logger.info("[patch_resume] START — resume %d chars  request=%r",
+                    len(current_resume), user_request[:120])
         t0 = time.monotonic()
-        prompt = (
-            "You are editing a resume. Apply ONLY the change described below.\n"
-            "Do NOT rewrite, restructure, or touch anything else.\n"
-            "Return the complete resume with only that specific change made.\n\n"
-            f"## Current Resume\n{current_resume}\n\n"
-            f"## Instruction\n{instruction}\n\n"
-            "Return the full resume with only this edit applied."
+        prompt = _PATCH_PROMPT.format(
+            current_resume=current_resume,
+            user_request=user_request,
         )
-        logger.info("[edit_resume] sending to %s (quality) — prompt %d chars",
+        logger.info("[patch_resume] sending to %s (quality) — prompt %d chars",
                     self._quality.provider_name, len(prompt))
-        result = await self._quality.complete(prompt, system="You are a precise resume editor.")
-        logger.info("[edit_resume] DONE %.2fs — output %d chars", time.monotonic() - t0, len(result))
+        result = await self._quality.complete(prompt, system=_PATCH_SYSTEM, max_tokens=1500)
+        logger.info("[patch_resume] DONE %.2fs — output %d chars", time.monotonic() - t0, len(result))
         return result
 
     async def write_cover_letter(
@@ -391,7 +500,7 @@ class HireLoopAI:
             "name": user_profile.get("name", ""),
             "skills": [s["skill_name"] for s in user_profile.get("skills", [])
                        if s.get("status", "").startswith("verified_")],
-            "work_history": user_profile.get("work_history", []),
+            "role":   user_profile.get("role", ""),
         }
         prompt = _COVER_LETTER_PROMPT.format(
             jd_text=_slim_job(job, ("title", "company", "location", "required_skills",
@@ -402,19 +511,19 @@ class HireLoopAI:
         )
         logger.info("[write_cover_letter] sending to %s (quality) — prompt %d chars",
                     self._quality.provider_name, len(prompt))
-        result = await self._quality.complete(prompt, system=_COVER_LETTER_SYSTEM)
+        result = await self._quality.complete(prompt, system=_COVER_LETTER_SYSTEM, max_tokens=800)
         logger.info("[write_cover_letter] DONE %.2fs — output %d chars", time.monotonic() - t0, len(result))
         return result
 
     async def expand_role_titles(self, role_titles: str) -> list[str]:
-        """Expand comma-separated role titles into 6–8 job-board-friendly search variants."""
+        """Expand comma-separated role titles into 3 job-board-friendly search variants."""
         logger.info("[expand_roles] START — input=%r", role_titles[:80])
         t0 = time.monotonic()
         if cached := cache.get("expand_roles", role_titles):
             logger.info("[expand_roles] CACHE HIT (%.2fs)", time.monotonic() - t0)
             return cached
         prompt = _EXPAND_ROLES_PROMPT.format(role_titles=role_titles)
-        raw = await self._fast.complete(prompt, system=_EXPAND_ROLES_SYSTEM)
+        raw = await self._fast.complete_json(prompt, system=_EXPAND_ROLES_SYSTEM, max_tokens=150)
         result = _parse_json(raw)
         if not isinstance(result, list):
             result = [role_titles]
@@ -432,28 +541,26 @@ class HireLoopAI:
         logger.info("[parse_and_fit] START — jd %d chars  skills=%d",
                     len(raw_jd_text), len(user_profile.get("skills", [])))
         t0 = time.monotonic()
-        if cached := cache.get("parse_and_fit", raw_jd_text, user_profile):
+        norm = _norm(raw_jd_text)
+        if cached := cache.get("parse_and_fit", norm, user_profile):
             logger.info("[parse_and_fit] CACHE HIT (%.2fs)", time.monotonic() - t0)
             return cached["parsed"], cached["fit"]
-        slim_skills = [
-            {"skill": s["skill_name"], "status": s.get("status", ""), "conf": s.get("confidence", "")}
-            for s in user_profile.get("skills", [])
-        ]
+        slim_skills = [s["skill_name"] for s in user_profile.get("skills", [])]
         prompt = _PARSE_AND_FIT_PROMPT.format(
-            jd_text=raw_jd_text,
+            jd_text=norm[:3000],
             skill_graph_json=_jc(slim_skills),
             variant_tags=", ".join(user_profile.get("variant_tags", ["general"])),
         )
         logger.info("[parse_and_fit] sending to %s — prompt %d chars", self._fast.provider_name, len(prompt))
         t_ai = time.monotonic()
-        raw = await self._fast.complete(prompt, system=_PARSE_AND_FIT_SYSTEM)
+        raw = await self._fast.complete_json(prompt, system=_PARSE_AND_FIT_SYSTEM, max_tokens=1200)
         logger.info("[parse_and_fit] AI responded in %.2fs — raw %d chars", time.monotonic() - t_ai, len(raw))
         result = _parse_json(raw)
         parsed = result.get("parsed") or {}
         fit    = result.get("fit") or {}
         logger.info("[parse_and_fit] DONE %.2fs — title=%r  fit_score=%s  action=%r",
                     time.monotonic() - t0, parsed.get("title"), fit.get("fit_score"), fit.get("action"))
-        cache.put("parse_and_fit", {"parsed": parsed, "fit": fit}, raw_jd_text, user_profile)
+        cache.put("parse_and_fit", {"parsed": parsed, "fit": fit}, norm, user_profile)
         return parsed, fit
 
     async def answer_screening_questions(
@@ -476,7 +583,7 @@ class HireLoopAI:
         logger.info("[answer_screening] sending to %s (quality) — prompt %d chars",
                     self._quality.provider_name, len(prompt))
         t_ai = time.monotonic()
-        raw = await self._quality.complete(prompt, system=_SCREENING_SYSTEM)
+        raw = await self._quality.complete_json(prompt, system=_SCREENING_SYSTEM, max_tokens=600)
         logger.info("[answer_screening] AI responded in %.2fs — raw %d chars", time.monotonic() - t_ai, len(raw))
         result = _parse_json(raw)
         logger.info("[answer_screening] DONE %.2fs — answered %d questions", time.monotonic() - t0, len(result))

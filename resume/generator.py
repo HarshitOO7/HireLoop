@@ -21,6 +21,33 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+
+# ── Resume utilities ───────────────────────────────────────────────────────────
+
+def _compress_resume(text: str) -> str:
+    """Collapse whitespace bloat from PDF extraction without losing any content."""
+    # Collapse 3+ consecutive blank lines → single blank line
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    # Strip trailing whitespace from every line
+    text = "\n".join(line.rstrip() for line in text.splitlines())
+    # Remove decorative separator lines (----, ====, ....)
+    text = re.sub(r'^[\-=\.]{4,}\s*$', '', text, flags=re.MULTILINE)
+    return text.strip()
+
+
+def apply_patch(current_md: str, patch_output: str) -> str:
+    """Splice AI-returned changed sections back into the current resume markdown.
+
+    The AI returns changed sections wrapped in <section name="SECTION NAME">...</section>.
+    Each matched section replaces the corresponding ## SECTION block in current_md.
+    """
+    for m in re.finditer(r'<section name="([^"]+)">(.*?)</section>', patch_output, re.DOTALL):
+        section_name = m.group(1).strip().upper()
+        new_content  = m.group(2).strip()
+        pattern = rf"(## {re.escape(section_name)}\n)(.*?)(?=\n## |\Z)"
+        current_md = re.sub(pattern, rf"\g<1>{new_content}\n\n", current_md, flags=re.DOTALL)
+    return current_md
+
 # ── Contact extraction ─────────────────────────────────────────────────────────
 
 _RE_EMAIL    = re.compile(r"[\w.+-]+@[\w-]+\.[a-z]{2,}", re.IGNORECASE)
@@ -214,15 +241,11 @@ async def generate_resume(
         header_md = _build_header(contact, is_tech)
         logger.info("[generator] header built — name=%r  is_tech=%s", contact.get("name"), is_tech)
 
-        # ── Build base_resume context: template format + candidate content ─────
-        _template_path = Path(__file__).parent / "variants" / "base_template.md"
-        template_text  = _template_path.read_text(encoding="utf-8")
+        # ── Build base_resume context: candidate content only (template is in system prompt) ─
         base_resume = (
             f"<!-- preferred section order: {', '.join(section_order)} -->\n\n"
-            f"## FORMAT TEMPLATE (structure and section names only — do NOT copy this content):\n"
-            f"{template_text}\n\n"
             f"## CANDIDATE'S UPLOADED RESUME (use this for actual content — skills, experience, bullets):\n"
-            + user.base_resume_markdown
+            + _compress_resume(user.base_resume_markdown)
             + (
                 f"\n\n## ADDITIONAL WORK HISTORY FROM SKILL GRAPH"
                 f" (add these to WORK EXPERIENCE even if absent from the uploaded resume):\n"

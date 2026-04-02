@@ -71,13 +71,17 @@ def _build_card_text(job: Job, parsed: dict, fit: dict) -> str:
     salary   = _md(parsed.get("salary_range") or "—")
     location = _md(parsed.get("location") or "—")
 
-    return (
+    text = (
         f"🏢 *{_md(parsed.get('title') or job.title)}*\n"
         f"{_md(job.company)} · {location} · {salary}\n\n"
         f"Fit Score: *{score}%* · {label}\n\n"
         f"✅ Matched: {matched_str}\n"
         f"❓ Gaps: {gap_str}"
     )
+    gap_summary = fit.get("gap_summary", "")
+    if gap_summary:
+        text += f"\n📝 _{_md(gap_summary)}_"
+    return text
 
 
 # ── Per-user scrape + notify ─────────────────────────────────────────────────
@@ -184,7 +188,7 @@ async def _analyze_remaining(
     ai,
 ) -> None:
     """Background task: analyze remaining batches silently and save to DB."""
-    sem   = asyncio.Semaphore(5)
+    sem   = asyncio.Semaphore(2)   # reduced from 5 to avoid 429s
     BATCH = 5
 
     async def _bg_one(raw) -> tuple:
@@ -211,6 +215,8 @@ async def _analyze_remaining(
             await _save_job_result(*result, user=user, qualifying=None)
         logger.info("[scheduler] background batch %d–%d / %d done",
                     i + 1, i + len(batch), len(jobs))
+        if i + BATCH < len(jobs):
+            await asyncio.sleep(2)   # breathing room between batches
 
 
 async def _process_user(user: User, bot, ai, is_manual: bool = False) -> int:
@@ -285,7 +291,7 @@ async def _process_user(user: User, bot, ai, is_manual: bool = False) -> int:
                 return (raw, None, None, h, "error")
 
     # ── Foreground: process batches of 5 until we have at least one match ────
-    sem_fg     = asyncio.Semaphore(5)
+    sem_fg     = asyncio.Semaphore(2)   # reduced to avoid 429s
     qualifying: list[Job] = []
     rest       = list(filtered)
 

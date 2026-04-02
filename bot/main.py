@@ -36,7 +36,12 @@ from bot.handlers.skill_verify import (
     get_jobs_command_handler,
     cmd_pending_jobs,
 )
-from bot.handlers.job_approval import get_job_approval_handlers
+from bot.handlers.job_approval import (
+    get_job_approval_handlers,
+    build_resume_edit_handler,
+    get_my_applications_handlers,
+    cmd_my_applications,
+)
 from bot.keyboards import MAIN_KEYBOARD
 from db.models import Base
 from db.session import engine
@@ -178,12 +183,13 @@ async def handle_keyboard_buttons(update, context):
     text = update.message.text
 
     routes = {
-        "📊 My Skills":    cmd_skills,
-        "⚙️ Settings":     cmd_settings,
-        "🎛️ Edit Filters": cmd_filters,
-        "⏸ Pause Agent":  cmd_pause,
-        "📋 Pending Jobs": cmd_pending_jobs,
-        "🔍 Fetch Jobs":   cmd_fetch_now,
+        "📊 My Skills":       cmd_skills,
+        "⚙️ Settings":        cmd_settings,
+        "🎛️ Edit Filters":    cmd_filters,
+        "⏸ Pause Agent":     cmd_pause,
+        "📋 Pending Jobs":    cmd_pending_jobs,
+        "🔍 Fetch Jobs":      cmd_fetch_now,
+        "📁 My Applications": cmd_my_applications,
     }
     handler = routes.get(text)
     if handler:
@@ -287,17 +293,22 @@ def main():
     app.add_handler(build_onboarding_handler())
     app.add_handler(build_add_skills_handler())
     app.add_handler(build_skill_verify_handler())
+    app.add_handler(build_resume_edit_handler())
 
     for h in get_settings_handlers():
         app.add_handler(h)
 
     app.add_handler(get_jobs_command_handler())
     app.add_handler(CommandHandler("fetchnow", cmd_fetch_now))
+    app.add_handler(CommandHandler("myapps", cmd_my_applications))
 
     for h in get_job_card_handlers():
         app.add_handler(h)
 
     for h in get_job_approval_handlers():
+        app.add_handler(h)
+
+    for h in get_my_applications_handlers():
         app.add_handler(h)
 
     # Catch-all for persistent keyboard taps
