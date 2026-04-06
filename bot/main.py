@@ -29,7 +29,7 @@ from ai.factory import AIFactory
 from ai.service import HireLoopAI
 from bot.onboarding import build_onboarding_handler
 from bot.handlers.add_skills import build_add_skills_handler
-from bot.handlers.settings import get_settings_handlers
+from bot.handlers.settings import get_settings_handlers, build_instructions_handler
 from bot.handlers.skill_verify import (
     build_skill_verify_handler,
     get_job_card_handlers,
@@ -294,6 +294,7 @@ def main():
     app.add_handler(build_add_skills_handler())
     app.add_handler(build_skill_verify_handler())
     app.add_handler(build_resume_edit_handler())
+    app.add_handler(build_instructions_handler())
 
     for h in get_settings_handlers():
         app.add_handler(h)

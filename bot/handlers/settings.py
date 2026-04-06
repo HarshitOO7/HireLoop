@@ -7,7 +7,13 @@ import io
 import logging
 from datetime import datetime
 from telegram import Update
-from telegram.ext import ContextTypes, CommandHandler
+from telegram.ext import (
+    ContextTypes,
+    CommandHandler,
+    ConversationHandler,
+    MessageHandler,
+    filters,
+)
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
@@ -254,7 +260,8 @@ async def cmd_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     f = user.filters or {}
-    blacklist = ", ".join(f.get("blacklist", [])) or "none"
+    blacklist    = ", ".join(f.get("blacklist", [])) or "none"
+    instructions = f.get("resume_instructions", "") or "none"
     lines = [
         "<b>Current Settings</b>\n",
         "Role: " + _e(f.get("role", "not set")),
@@ -265,7 +272,8 @@ async def cmd_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Notify frequency: " + _e(user.notify_freq or "daily"),
         "Min fit score: " + _e(user.min_fit_score) + "%",
         "Status: " + ("paused" if f.get("paused") else "active"),
-        "\nRun /start to update everything, or /filters to update just your filters.",
+        "Resume instructions: <i>" + _e(instructions) + "</i>",
+        "\nRun /start to update filters, /instructions to update resume instructions.",
     ]
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
@@ -333,12 +341,82 @@ async def cmd_deleteskill(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+_INSTRUCTIONS_INPUT = 0
+
+
+async def cmd_instructions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Show current standing instructions and ask for new ones."""
+    tg_id = str(update.effective_user.id)
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(User).where(User.telegram_id == tg_id))
+        user = result.scalar_one_or_none()
+
+    if not user:
+        await update.message.reply_text("Run /start first.")
+        return ConversationHandler.END
+
+    current = (user.filters or {}).get("resume_instructions", "")
+    preamble = f"Current instructions:\n_{_e(current)}_\n\n" if current else "No special instructions set yet.\n\n"
+
+    await update.message.reply_text(
+        f"{preamble}"
+        "Type standing instructions to apply to <b>every</b> resume HireLoop generates for you.\n\n"
+        "<i>Examples:</i>\n"
+        "• <i>Always target senior roles and lead with leadership impact.</i>\n"
+        "• <i>Keep to 1 page — condense aggressively.</i>\n"
+        "• <i>Emphasize healthcare domain expertise.</i>\n\n"
+        "Type <code>clear</code> to remove existing instructions, or /cancel to do nothing.",
+        parse_mode="HTML",
+    )
+    return _INSTRUCTIONS_INPUT
+
+
+async def _handle_instructions_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    text = update.message.text.strip()
+    tg_id = str(update.effective_user.id)
+
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            result = await session.execute(select(User).where(User.telegram_id == tg_id))
+            user = result.scalar_one_or_none()
+            if not user:
+                return ConversationHandler.END
+            f = user.filters or {}
+            if text.lower() == "clear":
+                f.pop("resume_instructions", None)
+                msg = "Instructions cleared — resumes will use default behaviour."
+            else:
+                f["resume_instructions"] = text
+                msg = "Instructions saved! They'll be applied to every resume from now on."
+            user.filters = f
+
+    await update.message.reply_text(msg, reply_markup=MAIN_KEYBOARD)
+    return ConversationHandler.END
+
+
+def build_instructions_handler() -> ConversationHandler:
+    return ConversationHandler(
+        entry_points=[CommandHandler("instructions", cmd_instructions)],
+        states={
+            _INSTRUCTIONS_INPUT: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, _handle_instructions_input),
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", lambda u, c: (
+            u.message.reply_text("Cancelled.", reply_markup=MAIN_KEYBOARD)
+            or ConversationHandler.END
+        ))],
+        allow_reentry=True,
+    )
+
+
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "<b>HireLoop Commands</b>\n\n"
         "/start -- onboarding wizard (or re-run to update)\n"
         "/skills -- view your skill graph\n"
         "/addskills -- add skills or upload a new resume\n"
+        "/instructions -- set standing instructions for all resumes\n"
         "/settings -- view all preferences\n"
         "/filters -- view current job filters\n"
         "/pause -- pause or resume job hunting\n"

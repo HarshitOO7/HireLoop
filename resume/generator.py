@@ -159,9 +159,10 @@ async def generate_resume(
             logger.error("[generator] user %s has no base resume — upload one first", user_id)
             return None
 
-        filters      = user.filters or {}
-        work_history = filters.get("work_history", [])
-        target_role  = filters.get("role", "")
+        filters               = user.filters or {}
+        work_history          = filters.get("work_history", [])
+        target_role           = filters.get("role", "")
+        special_instructions  = filters.get("resume_instructions", "")
 
         # ── Verified skills only (hard rule) ──────────────────────────────────
         node_result = await session.execute(
@@ -270,6 +271,7 @@ async def generate_resume(
                 base_resume=base_resume,
                 verified_skills=verified_skills,
                 user_evidence="\n".join(evidence_lines) if evidence_lines else "",
+                special_instructions=special_instructions,
             )
         except Exception as e:
             logger.error("[generator] tailor_resume failed: %s", e)

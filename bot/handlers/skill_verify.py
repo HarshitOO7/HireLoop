@@ -17,9 +17,11 @@ Handlers:
 """
 
 import logging
+import re
 from datetime import datetime
 
 from telegram import Update
+from telegram.error import BadRequest
 from telegram.ext import (
     CallbackQueryHandler,
     CommandHandler,
@@ -35,9 +37,92 @@ from db.session import AsyncSessionLocal
 logger = logging.getLogger(__name__)
 
 VERIFY_CONTEXT = 0
+VERIFY_DATE    = 1
+
+
+async def _safe_answer(query) -> None:
+    """Answer a callback query, silently ignoring expiry errors.
+
+    Telegram requires query.answer() within 60 seconds of the tap. If the bot
+    was busy processing another update, the query may have expired — this is
+    cosmetic only (the button spinner already stopped) and does not affect
+    edit_message_text() or any subsequent operations.
+    """
+    try:
+        await query.answer()
+    except BadRequest:
+        pass
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
+
+# Matches any meaningful date/duration mention in a skill context sentence.
+_RE_HAS_DATE = re.compile(
+    r"\b20\d{2}\b"                                                              # year 20XX
+    r"|(?:for\s+)?\d+\s*(?:month|year|yr|mo)s?\b"                             # "for 8 months", "2yr"
+    r"|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+20\d{2}"    # "Jan 2022"
+    r"|\bsince\s+20\d{2}"                                                       # "since 2020"
+    r"|\b(?:19|20)\d{2}\s*[-–to]+\s*(?:(?:19|20)\d{2}|present|now|current)",  # "2019–2022"
+    re.IGNORECASE,
+)
+
+
+def _has_date(text: str) -> bool:
+    return bool(_RE_HAS_DATE.search(text))
+
+
+async def _save_evidence(
+    skill_name: str,
+    job_id: str,
+    text: str,
+    context: ContextTypes.DEFAULT_TYPE,
+    msg,
+) -> None:
+    """Upsert SkillNode + SkillEvidence, reply 'Saved ✅', record evidence_id."""
+    from sqlalchemy import select
+    evidence_id = None
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            job_result = await session.execute(select(Job).where(Job.id == job_id))
+            job = job_result.scalar_one_or_none()
+
+            if job:
+                node_result = await session.execute(
+                    select(SkillNode).where(
+                        SkillNode.user_id    == job.user_id,
+                        SkillNode.skill_name == skill_name,
+                    )
+                )
+                node = node_result.scalar_one_or_none()
+
+                if node:
+                    node.status     = "verified_attested"
+                    node.updated_at = datetime.utcnow()
+                else:
+                    node = SkillNode(
+                        user_id    = job.user_id,
+                        skill_name = skill_name,
+                        status     = "verified_attested",
+                        confidence = "medium",
+                        created_at = datetime.utcnow(),
+                        updated_at = datetime.utcnow(),
+                    )
+                    session.add(node)
+                    await session.flush()
+
+                ev = SkillEvidence(
+                    skill_node_id = node.id,
+                    user_context  = text,
+                    source        = "telegram",
+                )
+                session.add(ev)
+                await session.flush()
+                evidence_id = ev.id
+
+    context.user_data.setdefault("verify_evidence_ids", []).append(evidence_id)
+    safe_name = skill_name.replace("_", "\\_").replace("*", "\\*").replace("`", "\\`")
+    await msg.reply_text(f"Saved: *{safe_name}* ✅", parse_mode="Markdown")
+
 
 async def _get_job(job_id: str) -> Job | None:
     from sqlalchemy import select
@@ -88,7 +173,7 @@ async def _finish_verification(context: ContextTypes.DEFAULT_TYPE, msg) -> int:
 async def job_skills_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Entry: user tapped [✅ I know these] on a job card."""
     query = update.callback_query
-    await query.answer()
+    await _safe_answer(query)
 
     job_id = query.data.split("job_skills_", 1)[1]
     job    = await _get_job(job_id)
@@ -191,50 +276,42 @@ async def handle_verify_context(update: Update, context: ContextTypes.DEFAULT_TY
         )
         return VERIFY_CONTEXT
 
+    # ── Ask for date if none detected ─────────────────────────────────────────
+    if not _has_date(text):
+        context.user_data["pending_context"] = text
+        await update.message.reply_text(
+            "Got it! When was this? Give a rough timeframe.\n\n"
+            "_Examples: 2021–2023, for 8 months, since 2020_\n\n"
+            "Type `skip` to save without a date.",
+            parse_mode="Markdown",
+        )
+        return VERIFY_DATE
+
     # ── Save evidence ─────────────────────────────────────────────────────────
-    from sqlalchemy import select
-    evidence_id = None
-    async with AsyncSessionLocal() as session:
-        async with session.begin():
-            job_result = await session.execute(select(Job).where(Job.id == job_id))
-            job = job_result.scalar_one_or_none()
+    await _save_evidence(skill_name, job_id, text, context, update.message)
+    context.user_data["verify_idx"] = idx + 1
+    return await _ask_next_gap(context, update.message)
 
-            if job:
-                node_result = await session.execute(
-                    select(SkillNode).where(
-                        SkillNode.user_id    == job.user_id,
-                        SkillNode.skill_name == skill_name,
-                    )
-                )
-                node = node_result.scalar_one_or_none()
 
-                if node:
-                    node.status     = "verified_attested"
-                    node.updated_at = datetime.utcnow()
-                else:
-                    node = SkillNode(
-                        user_id    = job.user_id,
-                        skill_name = skill_name,
-                        status     = "verified_attested",
-                        confidence = "medium",
-                        created_at = datetime.utcnow(),
-                        updated_at = datetime.utcnow(),
-                    )
-                    session.add(node)
-                    await session.flush()
+async def handle_verify_date(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """User replied with a date/duration after we asked for one."""
+    text    = update.message.text.strip()
+    pending = context.user_data.pop("pending_context", "")
+    idx     = context.user_data.get("verify_idx", 0)
+    gaps    = context.user_data.get("verify_gaps", [])
 
-                ev = SkillEvidence(
-                    skill_node_id = node.id,
-                    user_context  = text,
-                    source        = "telegram",
-                )
-                session.add(ev)
-                await session.flush()
-                evidence_id = ev.id
+    if idx >= len(gaps):
+        return await _finish_verification(context, update.message)
 
-    context.user_data.setdefault("verify_evidence_ids", []).append(evidence_id)
-    safe_name = skill_name.replace("_", "\\_").replace("*", "\\*").replace("`", "\\`")
-    await update.message.reply_text(f"Saved: *{safe_name}* ✅", parse_mode="Markdown")
+    skill_name = gaps[idx]["skill"]
+    job_id     = context.user_data.get("verify_job_id")
+
+    if _looks_like_skip(text) or text.lower() in ("no date", "n/a", "na", "none"):
+        combined = pending          # save context without date
+    else:
+        combined = f"{pending} ({text})"
+
+    await _save_evidence(skill_name, job_id, combined, context, update.message)
     context.user_data["verify_idx"] = idx + 1
     return await _ask_next_gap(context, update.message)
 
@@ -259,7 +336,7 @@ async def _do_skip_job(query, job_id: str, telegram_id: str, bot) -> None:
 async def job_skip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles job_skip_{id} from the job card keyboard."""
     query  = update.callback_query
-    await query.answer()
+    await _safe_answer(query)
     job_id = query.data.split("job_skip_", 1)[1]
     await _do_skip_job(query, job_id, str(update.effective_user.id), context.bot)
 
@@ -267,7 +344,7 @@ async def job_skip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def job_skip_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles skip_job_{id} from resume delivery / approval keyboards."""
     query  = update.callback_query
-    await query.answer()
+    await _safe_answer(query)
     job_id = query.data.split("skip_job_", 1)[1]
     await _do_skip_job(query, job_id, str(update.effective_user.id), context.bot)
 
@@ -275,7 +352,7 @@ async def job_skip_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 async def job_generate_anyway(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """User tapped [➡️ Generate Anyway] — skip skill verify, go straight to resume gen."""
     query  = update.callback_query
-    await query.answer()
+    await _safe_answer(query)
     job_id = query.data.split("job_generate_", 1)[1]
 
     job = await _get_job(job_id)
@@ -290,7 +367,7 @@ async def job_generate_anyway(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def job_full_jd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query  = update.callback_query
-    await query.answer()
+    await _safe_answer(query)
     job_id = query.data.split("job_fulljd_", 1)[1]
 
     job = await _get_job(job_id)
@@ -359,6 +436,9 @@ def build_skill_verify_handler() -> ConversationHandler:
         states={
             VERIFY_CONTEXT: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_verify_context),
+            ],
+            VERIFY_DATE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_verify_date),
             ],
         },
         fallbacks=[],

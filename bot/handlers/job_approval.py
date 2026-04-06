@@ -35,6 +35,7 @@ from pathlib import Path
 
 from sqlalchemy import update as sa_update
 from telegram import Update
+from telegram.error import BadRequest
 from telegram.ext import (
     CallbackQueryHandler,
     CommandHandler,
@@ -57,6 +58,14 @@ from jobs.scheduler import send_next_pending_card
 logger = logging.getLogger(__name__)
 
 EDIT_AWAITING_REQUEST = 10  # ConversationHandler state
+
+
+async def _safe_answer(query) -> None:
+    """Answer a callback query, silently ignoring expiry errors (>60s since tap)."""
+    try:
+        await query.answer()
+    except BadRequest:
+        pass
 
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
@@ -191,7 +200,7 @@ async def start_resume_generation(
 
 async def cl_yes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query  = update.callback_query
-    await query.answer()
+    await _safe_answer(query)
     job_id = query.data.split("cl_yes_", 1)[1]
     ai     = context.bot_data.get("ai")
 
@@ -232,7 +241,7 @@ async def cl_yes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def cl_no(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query  = update.callback_query
-    await query.answer()
+    await _safe_answer(query)
     job_id = query.data.split("cl_no_", 1)[1]
 
     job = await _load_job(job_id)
@@ -263,7 +272,7 @@ async def _finish_delivery(chat_id: int, job: Job | None, job_id: str, formats: 
 
 async def deliver_docx(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query  = update.callback_query
-    await query.answer()
+    await _safe_answer(query)
     job_id = query.data.split("deliver_docx_", 1)[1]
 
     job = await _load_job(job_id)
@@ -288,7 +297,7 @@ async def deliver_docx(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 async def deliver_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query  = update.callback_query
-    await query.answer()
+    await _safe_answer(query)
     job_id = query.data.split("deliver_pdf_", 1)[1]
 
     job = await _load_job(job_id)
@@ -313,7 +322,7 @@ async def deliver_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 async def deliver_both(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query  = update.callback_query
-    await query.answer()
+    await _safe_answer(query)
     job_id = query.data.split("deliver_both_", 1)[1]
 
     job = await _load_job(job_id)
@@ -342,7 +351,7 @@ async def deliver_both(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def edit_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """User tapped Looks good — mark approved and send next card."""
     query  = update.callback_query
-    await query.answer()
+    await _safe_answer(query)
     job_id = query.data.split("edit_done_", 1)[1]
     await query.edit_message_text("Great! Moving on...")
     await _mark_job_approved(job_id)
@@ -356,7 +365,7 @@ async def edit_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 async def edit_resume_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Entry: user tapped ✏️ Edit resume — ask what to change."""
     query  = update.callback_query
-    await query.answer()
+    await _safe_answer(query)
     job_id = query.data.split("edit_resume_", 1)[1]
     context.user_data["edit_job_id"] = job_id
     await query.message.reply_text(
@@ -487,7 +496,7 @@ async def cmd_my_applications(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def app_docx(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query  = update.callback_query
-    await query.answer()
+    await _safe_answer(query)
     app_id = int(query.data.split("app_docx_", 1)[1])
     app = await _load_app_by_id(app_id)
     if not app or not app.resume_markdown:
@@ -503,7 +512,7 @@ async def app_docx(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def app_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query  = update.callback_query
-    await query.answer()
+    await _safe_answer(query)
     app_id = int(query.data.split("app_pdf_", 1)[1])
     app = await _load_app_by_id(app_id)
     if not app or not app.resume_markdown:
@@ -519,7 +528,7 @@ async def app_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def app_cl(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query  = update.callback_query
-    await query.answer()
+    await _safe_answer(query)
     app_id = int(query.data.split("app_cl_", 1)[1])
     app = await _load_app_by_id(app_id)
     if not app or not app.cover_letter_markdown:

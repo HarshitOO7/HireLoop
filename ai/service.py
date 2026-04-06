@@ -165,6 +165,12 @@ HARD RULES:
 - GitHub link: only include if the candidate's resume already contains one AND the target role is technical (software/engineering/data/IT). Omit entirely for non-technical roles.
 - Links: write bare URLs (e.g. linkedin.com/in/username) — the renderer handles making them clickable
 
+EXPERIENCE FILTERING:
+- Omit work experience entries older than 10 years unless they directly use a required skill for the target role
+- Keep at most 4 Work Experience entries; if more exist, drop the oldest/least relevant first
+- For retained older roles, condense to 1–2 bullets — never omit an entry that is within 10 years
+- Education, certifications, licences, and volunteer work are exempt from the 10-year rule — always include them
+
 ANTI-HALLUCINATION RULES:
 - Every bullet must be traceable to either the base resume or the evidence notes
 - Never add a metric (%, $, number) that does not appear in the source material
@@ -209,6 +215,10 @@ _TAILOR_PROMPT = """Tailor this resume for the job below.
 <evidence_notes>
 {user_evidence_text}
 </evidence_notes>
+
+<special_instructions>
+{special_instructions_text}
+</special_instructions>
 
 Cover letter required: {requires_cl}
 
@@ -444,6 +454,7 @@ class HireLoopAI:
         base_resume: str,
         verified_skills: list[dict],
         user_evidence: str = "",
+        special_instructions: str = "",
     ) -> str:
         variant = fit.get("best_resume_variant", "general")
         requires_cl = bool(job.get("requires_cover_letter", False))
@@ -462,6 +473,7 @@ class HireLoopAI:
                                     "seniority", "years_experience", "cover_letter_keywords")),
             verified_skills_json=_jc(verified_skills),
             user_evidence_text=user_evidence or "None provided.",
+            special_instructions_text=special_instructions or "None.",
             requires_cl="yes" if requires_cl else "no",
             cover_letter_instruction=cover_letter_instruction,
         )
