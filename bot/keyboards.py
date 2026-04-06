@@ -187,7 +187,9 @@ def post_delivery_keyboard(job_id: str, job_url: str | None) -> InlineKeyboardMa
     """Keyboard shown after resume files are delivered."""
     rows = [
         [
-            InlineKeyboardButton("✅ Looks good",   callback_data=f"edit_done_{job_id}"),
+            InlineKeyboardButton("✅ Looks good — next ➡️", callback_data=f"edit_done_{job_id}"),
+        ],
+        [
             InlineKeyboardButton("✏️ Edit resume",  callback_data=f"edit_resume_{job_id}"),
         ],
     ]

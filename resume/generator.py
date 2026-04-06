@@ -85,9 +85,10 @@ def _extract_contact(raw_text: str) -> dict:
     Any field may be None if not found.
     """
     lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
-    # Name: first non-empty line; strip markdown # prefix and any trailing | location
+    # Name: first non-empty line; strip markdown # prefix and any trailing location.
+    # Location may be separated by | or a tab (both are common in PDF-extracted resumes).
     name_raw = lines[0].lstrip("# ").strip() if lines else None
-    name = name_raw.split("|")[0].strip() if name_raw else None
+    name = re.split(r"[\|\t]", name_raw)[0].strip() if name_raw else None
 
     email        = m.group(0) if (m := _RE_EMAIL.search(raw_text))    else None
     linkedin_url = m.group(0) if (m := _RE_LINKEDIN.search(raw_text)) else None
