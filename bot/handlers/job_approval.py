@@ -57,7 +57,8 @@ from jobs.scheduler import send_next_pending_card
 
 logger = logging.getLogger(__name__)
 
-EDIT_AWAITING_REQUEST = 10  # ConversationHandler state
+EDIT_AWAITING_REQUEST = 10   # ConversationHandler state
+_MAX_EDIT_CHARS       = 600  # one clear edit request — no essays
 
 
 async def _safe_answer(query) -> None:
@@ -380,6 +381,14 @@ async def edit_resume_start(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 async def edit_resume_apply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """User typed their edit request — call AI patch and re-send files."""
     text = update.message.text.strip()
+
+    if text.lower() != "cancel" and len(text) > _MAX_EDIT_CHARS:
+        text = text[:_MAX_EDIT_CHARS]
+        await update.message.reply_text(
+            f"_(Trimmed to {_MAX_EDIT_CHARS} characters — one focused request works best.)_",
+            parse_mode="Markdown",
+        )
+
     if text.lower() == "cancel":
         await update.message.reply_text("Edit cancelled.")
         return ConversationHandler.END

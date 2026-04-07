@@ -466,14 +466,19 @@ class HireLoopAI:
         logger.info("[tailor_resume] START — job=%r  variant=%s  verified_skills=%d  base_resume=%d chars",
                     job.get("title", "?"), variant, len(verified_skills), len(base_resume))
         t0 = time.monotonic()
+        # Safety-truncate user-supplied strings — defence in depth against DB data
+        # entered before limits were enforced or by a future admin/bulk import.
+        _evidence = (user_evidence or "")[:2000]
+        _instructions = (special_instructions or "")[:600]
+
         prompt = _TAILOR_PROMPT.format(
             variant_tag=variant,
             base_resume_text=base_resume,
             jd_text=_slim_job(job, ("title", "company", "required_skills", "preferred_skills",
                                     "seniority", "years_experience", "cover_letter_keywords")),
             verified_skills_json=_jc(verified_skills),
-            user_evidence_text=user_evidence or "None provided.",
-            special_instructions_text=special_instructions or "None.",
+            user_evidence_text=_evidence or "None provided.",
+            special_instructions_text=_instructions or "None.",
             requires_cl="yes" if requires_cl else "no",
             cover_letter_instruction=cover_letter_instruction,
         )
@@ -494,7 +499,7 @@ class HireLoopAI:
         t0 = time.monotonic()
         prompt = _PATCH_PROMPT.format(
             current_resume=current_resume,
-            user_request=user_request,
+            user_request=user_request[:600],   # safety cap — handler already enforces this
         )
         logger.info("[patch_resume] sending to %s (quality) — prompt %d chars",
                     self._quality.provider_name, len(prompt))

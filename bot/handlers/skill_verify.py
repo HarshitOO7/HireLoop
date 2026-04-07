@@ -212,7 +212,8 @@ async def job_skills_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     return await _ask_next_gap(context, query.message)
 
 
-_MIN_CONTEXT_WORDS = 4  # reject responses that are too short to be meaningful
+_MIN_CONTEXT_WORDS  = 4    # reject responses that are too short to be meaningful
+_MAX_EVIDENCE_CHARS = 400  # one or two sentences — anything longer gets trimmed
 
 
 def _looks_like_skip(text: str) -> bool:
@@ -275,6 +276,14 @@ async def handle_verify_context(update: Update, context: ContextTypes.DEFAULT_TY
             parse_mode="Markdown",
         )
         return VERIFY_CONTEXT
+
+    # ── Cap length ────────────────────────────────────────────────────────────
+    if len(text) > _MAX_EVIDENCE_CHARS:
+        text = text[:_MAX_EVIDENCE_CHARS]
+        await update.message.reply_text(
+            f"_(Trimmed to {_MAX_EVIDENCE_CHARS} characters — keep it to one or two sentences.)_",
+            parse_mode="Markdown",
+        )
 
     # ── Ask for date if none detected ─────────────────────────────────────────
     if not _has_date(text):

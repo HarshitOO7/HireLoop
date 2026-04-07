@@ -341,7 +341,8 @@ async def cmd_deleteskill(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-_INSTRUCTIONS_INPUT = 0
+_INSTRUCTIONS_INPUT    = 0
+_MAX_INSTRUCTIONS_CHARS = 600  # a few directive sentences — enough for any real use-case
 
 
 async def cmd_instructions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -374,6 +375,13 @@ async def cmd_instructions(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 async def _handle_instructions_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     text = update.message.text.strip()
     tg_id = str(update.effective_user.id)
+
+    if text.lower() != "clear" and len(text) > _MAX_INSTRUCTIONS_CHARS:
+        text = text[:_MAX_INSTRUCTIONS_CHARS]
+        await update.message.reply_text(
+            f"_(Trimmed to {_MAX_INSTRUCTIONS_CHARS} characters — keep instructions brief and directive.)_",
+            parse_mode="Markdown",
+        )
 
     async with AsyncSessionLocal() as session:
         async with session.begin():
