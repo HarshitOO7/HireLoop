@@ -8,7 +8,7 @@
     <img src="https://img.shields.io/badge/telegram-bot-2CA5E0?style=flat-square&logo=telegram&logoColor=white" />
     <img src="https://img.shields.io/badge/AI-multi--provider-8A2BE2?style=flat-square" />
     <img src="https://img.shields.io/badge/database-SQLite%20%7C%20PostgreSQL-003B57?style=flat-square&logo=sqlite&logoColor=white" />
-    <img src="https://img.shields.io/badge/phase-1%20week%203%20done-green?style=flat-square" />
+    <img src="https://img.shields.io/badge/phase--1-complete-green?style=flat-square" />
     <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" />
   </p>
 </p>
@@ -59,16 +59,20 @@ Scrape jobs  →  Score fit  →  Verify skills  →  Generate resume  →  You 
 | APScheduler — daily scrape at 08:00 + 18:00 | ✅ Done |
 | /fetchnow — instant on-demand scrape | ✅ Done |
 | Auto-purge stale jobs after 10 days (keeps applied/approved) | ✅ Done |
-| Resume stored as Markdown in DB (render on-demand) | 🔜 Week 4 |
-| Resume tailoring — resume/generator.py | 🔜 Week 4 |
-| Word (.docx) export via python-docx (primary, ATS-controlled) | 🔜 Week 4 |
-| PDF export on-request via reportlab (resume/pdf_export.py ✅) | 🔜 Week 4 |
-| ATS-safe output (single-col, no tables/boxes, standard headings) | 🔜 Week 4 |
-| Smart resume section order (inferred from profile, zero AI tokens) | 🔜 Week 4 |
-| Job scraper summary card before first job card | 🔜 Week 4 |
-| Job approval screen — [📄 Word] [📋 PDF] [Both] [Skip] | 🔜 Week 4 |
-| Cover letter generation (on request only) | 🔜 Week 4 |
-| Application logging | 🔜 Week 4 |
+| Resume stored as Markdown in DB (render on-demand) | ✅ Done |
+| Resume tailoring — resume/generator.py | ✅ Done |
+| Word (.docx) export via python-docx (primary, ATS-controlled) | ✅ Done |
+| PDF export on-request via reportlab | ✅ Done |
+| ATS-safe output (single-col, no tables/boxes, standard headings) | ✅ Done |
+| Smart resume section order (inferred from profile, zero AI tokens) | ✅ Done |
+| Job approval screen — [📄 Word] [📋 PDF] [Both] [Skip] | ✅ Done |
+| Cover letter generation (on request only) | ✅ Done |
+| Application logging + /myapps history | ✅ Done |
+| Post-delivery resume edit loop (AI patch, re-send) | ✅ Done |
+| Skill evidence date follow-up (asks when if no date detected) | ✅ Done |
+| Standing resume instructions (/instructions — apply to every resume) | ✅ Done |
+| Experience filtering (max 4 entries, drop >10 yr old unless required) | ✅ Done |
+| Input length caps (skill evidence 400 chars, instructions/edits 600 chars) | ✅ Done |
 | Recruiter finder | 🔜 Phase 2 |
 | Embedding-based fit scoring (RAG / semantic similarity) | 🔜 Phase 3 |
 | Auto-apply (Playwright) | 🔜 Phase 3 |
@@ -288,17 +292,19 @@ Stripped suffixes: `cms`, `framework`, `db`, `database`, `server`, `sdk`, `api`,
 Register these with [@BotFather](https://t.me/BotFather) (`/setcommands`):
 
 ```
-start       - Onboarding wizard (or re-run to update profile)
-addskills   - Add new skills or upload an updated resume
-skills      - View your skill graph (HTML report)
-settings    - View all preferences
-filters     - Edit job filters
-pause       - Pause or resume job hunting
-deleteskill - Remove a skill by name
-fetchnow    - Trigger an immediate job scrape
-menu        - Refresh the keyboard (useful after bot restarts)
-cancel      - Cancel current operation
-help        - Full command list
+start        - Onboarding wizard (or re-run to update profile)
+addskills    - Add new skills or upload an updated resume
+skills       - View your skill graph (HTML report)
+instructions - Set standing instructions applied to every resume
+settings     - View all preferences
+filters      - Edit job filters
+pause        - Pause or resume job hunting
+deleteskill  - Remove a skill by name
+fetchnow     - Trigger an immediate job scrape
+myapps       - View last 10 applications + re-download files
+menu         - Refresh the keyboard (useful after bot restarts)
+cancel       - Cancel current operation
+help         - Full command list
 ```
 
 ### Persistent Keyboard
@@ -546,7 +552,7 @@ hireloop/
 │   ├── keyboards.py               # All InlineKeyboardMarkup builders
 │   └── handlers/
 │       ├── add_skills.py          # /addskills ConversationHandler (6 states)
-│       ├── settings.py            # /skills /settings /filters /pause /help /deleteskill
+│       ├── settings.py            # /skills /settings /filters /pause /help /deleteskill /instructions
 │       ├── skill_verify.py        # (Week 3) job skill confirmation
 │       ├── job_approval.py        # (Week 4) resume approve/edit/skip
 │       └── resume_upload.py       # (Week 4) resume generation
@@ -631,7 +637,7 @@ jobs
   recruiter_name · recruiter_linkedin · status · created_at
 
 applications
-  id · job_id (FK) · resume_path · cover_letter_path · applied_at
+  id · job_id (FK) · resume_markdown · cover_letter_markdown · applied_at
   outcome · outcome_source · outcome_at
 ```
 
@@ -661,15 +667,19 @@ applications
 - [x] /fetchnow — instant on-demand scrape
 - [x] Auto-purge stale jobs after 10 days
 - [x] PDF export (reportlab) — resume/pdf_export.py (render layer ready)
-- [ ] Resume generator — resume/generator.py (AI tailoring → store Markdown in DB)
-- [ ] Word (.docx) export — resume/docx_export.py via python-docx (ATS-safe)
-- [ ] Smart section order — resume/section_order.py (pure Python decision tree, zero tokens)
-- [ ] is_career_changer inference (domain match + years_exp + full-time role check)
-- [ ] ATS-safe constraints: single-col, no tables/text-boxes, standard section names
-- [ ] Job scraper summary card (X jobs found · Y above threshold · Z ready)
-- [ ] Job approval screen — [📄 Word] [📋 PDF] [Both] [⏭ Skip]
-- [ ] Cover letter generation (on request only)
-- [ ] Application logging to DB
+- [x] Resume generator — resume/generator.py (AI tailoring → store Markdown in DB)
+- [x] Word (.docx) export — resume/docx_export.py via python-docx (ATS-safe)
+- [x] Smart section order — resume/section_order.py (pure Python decision tree, zero tokens)
+- [x] is_career_changer inference (domain match + years_exp + full-time role check)
+- [x] ATS-safe constraints: single-col, no tables/text-boxes, standard section names
+- [x] Job approval screen — [📄 Word] [📋 PDF] [Both] [⏭ Skip]
+- [x] Cover letter generation (on request only)
+- [x] Application logging to DB + /myapps history with re-download
+- [x] Post-delivery resume edit loop (AI patch → re-send updated file)
+- [x] Skill evidence date follow-up (regex date detection, asks when absent)
+- [x] Standing resume instructions (/instructions → stored in user.filters)
+- [x] Experience filtering (max 4 work entries, drop >10 yr unless required skill)
+- [x] Input length caps on all AI-facing user text (two-layer: handler + service.py)
 
 ### Phase 2 — Multi-user + Intelligence
 - [ ] Recruiter finder (3-tier: JD parse → LinkedIn → web search)
@@ -719,6 +729,7 @@ The compose file runs the bot process + volume-mounts the SQLite DB and resume o
 - Never commit `.env` — it's in `.gitignore`
 - Set `ALLOWED_TELEGRAM_IDS` to restrict access to your own Telegram user ID
 - All user-supplied text is HTML-escaped before being sent back through Telegram (no Markdown injection)
+- User-supplied text passed to AI is capped: skill evidence 400 chars, standing instructions and edit requests 600 chars each; `service.py` applies a second silent truncation as defence-in-depth
 - No external web server is exposed — the bot uses Telegram's long-polling
 
 ---
