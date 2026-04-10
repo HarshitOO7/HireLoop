@@ -572,7 +572,8 @@ hireloop/
 │   └── output/                    # Generated files (gitignored)
 │
 └── scripts/
-    └── test_provider.py           # Smoke-test any AI provider from CLI
+    ├── test_provider.py           # AI provider smoke test (fast + quality)
+    └── test_resume_generation.py  # Resume gen E2E: real DB copy → generate → edit → DOCX
 ```
 
 ---
@@ -703,8 +704,11 @@ applications
 ## Running Tests
 
 ```bash
-# Test any AI provider from CLI
+# AI provider smoke test — verifies fast + quality providers respond correctly
 python scripts/test_provider.py
+
+# Resume generation end-to-end — uses real DB copy, interactive approve/edit loop
+python scripts/test_resume_generation.py
 
 # Syntax check all modules
 python -m py_compile bot/main.py bot/onboarding.py \
@@ -712,9 +716,11 @@ python -m py_compile bot/main.py bot/onboarding.py \
   ai/service.py ai/factory.py db/models.py
 ```
 
+`test_resume_generation.py` copies `hireloop.db` → `hireloop_test.db` (prod untouched), generates a tailored resume with real user data, and gives you an interactive **[L] Looks good / [E] Edit / [S] Skip** loop with full logs showing section order, AI timing, and which sections each edit touched. DOCX files are saved to `resume/output/`.
+
 ---
 
-## Docker (coming Week 4)
+## Docker
 
 ```bash
 docker-compose up -d

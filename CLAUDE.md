@@ -72,7 +72,8 @@ hireloop/
 │
 ├── tests/
 └── scripts/
-    └── test_provider.py
+    ├── test_provider.py           # AI provider smoke test
+    └── test_resume_generation.py  # Resume gen E2E: real DB copy → generate → edit → DOCX
 ```
 
 ---
@@ -382,41 +383,22 @@ Filters run BEFORE passing jobs to fit analysis:
 
 ## Phase 1 Build Order
 
-### Week 1 — Foundation
-- requirements.txt + .env.example
-- ai/ layer: base.py, factory.py, service.py, all providers
-- db/models.py + db/session.py + alembic migration
-- scripts/test_provider.py
-DONE WHEN: test_provider.py calls AI and returns JSON fit analysis
+### Phase 1 — Complete ✅
 
-### Week 2 — Telegram + Onboarding
-- Create bot via @BotFather
-- bot/main.py + bot/keyboards.py
-- bot/onboarding.py (6 ConversationHandler states)
-- bot/handlers/resume_upload.py + settings.py
-DONE WHEN: /start wizard works end-to-end, skill graph in DB
+All features shipped and tested:
 
-### Week 3 — Job Discovery
-- jobs/scraper.py (JobSpy) + jobs/parser.py (Jina) + jobs/filters.py
-- jobs/scheduler.py (APScheduler — AsyncIOScheduler)
-- Telegram notification card + skill verification dialog
-- bot/handlers/skill_verify.py
-DONE WHEN: paste URL in Telegram → get fit analysis → verify skill → DB updated
+- **Foundation**: AI provider layer (5 providers), factory, tiered routing, in-memory cache
+- **Database**: SQLAlchemy async, skill graph schema (User · SkillNode · SkillEvidence · Job · Application)
+- **Telegram bot**: onboarding wizard (12 states), skill verify, job approval, settings, /addskills
+- **Job scraper**: JobSpy (Indeed ✅ · LinkedIn ⚠️ partial · Glassdoor ✅ · Google ❌ skipped), Jina URL paste, APScheduler, dedup
+- **Resume pipeline**: generator, section order (pure Python), DOCX export (python-docx), PDF export (reportlab)
+- **Edit loop**: patch_resume() + apply_patch() → AI-targeted section edits
+- **Quality controls**: input caps (two-layer), standing instructions, experience filtering (max 4 entries, drop >10yr)
+- **Application tracking**: /myapps history, outcome logging
 
-### Week 4 — Resume + Approval
-- resume/section_order.py — pure Python decision tree (fresher/career changer/experienced)
-  - is_career_changer = domain_mismatch + years_exp >= 2 + any(duration_months >= 6)
-  - stored in user.filters["resume_section_order"], auto-updated on resume upload
-  - Groq fallback (~70 tokens) for edge cases only
-- resume/generator.py — tailor_resume() → store Markdown TEXT in DB
-- resume/docx_export.py — python-docx (ATS-safe, explicit styles, primary format)
-- resume/pdf_export.py — reportlab (on-request, already done ✅)
-- ATS-safe: single-col, no tables, standard section names, add_heading(level=1)
-- job scraper summary card before first job card (X found · Y above threshold)
-- bot/handlers/job_approval.py — [📄 Word] [📋 PDF] [Both] [⏭ Skip]
-- Conditional cover letter logic
-- docker-compose.yml
-DONE WHEN: full loop works end-to-end, Word + PDF delivered, application logged
+Test scripts:
+- `python scripts/test_provider.py`           — AI provider smoke test
+- `python scripts/test_resume_generation.py`  — resume gen E2E (real DB copy, interactive approve/edit loop)
 
 ---
 
@@ -471,7 +453,9 @@ DONE WHEN: full loop works end-to-end, Word + PDF delivered, application logged
 
 ## Current Status
 
-Week 1–3 complete. Scraper pipeline testing:
+Phase 1 complete. All features shipped.
+
+Scraper status:
 - Indeed ✅
 - LinkedIn ⚠️ not fully tested (may have bugs)
 - Google Jobs ❌ skipped (JS-only page, JobSpy broken, revisit Phase 2)
@@ -482,3 +466,13 @@ Canadian IPs get geo-redirected glassdoor.com → glassdoor.ca, where Cloudflare
 blocks tls_client (JobSpy default) with 403.  Fix: monkey-patch in jobs/glassdoor_patch.py
 replaces JobSpy's create_session with curl_cffi (Chrome124 impersonation) and tolerates
 partial GraphQL errors (SEO-only 503s are non-fatal).  Applied at import time in scraper.py.
+
+### Test scripts
+```bash
+python scripts/test_provider.py           # AI provider smoke test (fast + quality)
+python scripts/test_resume_generation.py  # Resume gen E2E — real DB copy, interactive
+```
+
+`test_resume_generation.py` copies hireloop.db → hireloop_test.db, runs generate_resume()
+with real user data, shows full logs (section order, AI timing, sections modified on edit),
+and provides an interactive [L]ooks good / [E]dit / [S]kip loop with DOCX output.
