@@ -179,6 +179,7 @@ async def _run_job(job_id: str, title: str, company: str, fit: float, ai: HireLo
     from db.session import AsyncSessionLocal
     from resume.section_order import get_section_order
 
+    evidence_notes = ""
     async with AsyncSessionLocal() as s:
         job_row = (await s.execute(select(Job).where(Job.id == job_id))).scalar_one_or_none()
         if not job_row:
@@ -201,6 +202,34 @@ async def _run_job(job_id: str, title: str, company: str, fit: float, ai: HireLo
         work_history = filters.get("work_history", [])
         target_role = filters.get("role", "")
         section_order = get_section_order(target_role, work_history)
+
+        # Gather evidence notes for patch context
+        node_result = await s.execute(
+            select(SkillNode).where(
+                SkillNode.user_id == AMAN_USER_ID,
+                SkillNode.status.like("verified_%"),
+            )
+        )
+        nodes = {n.id: n for n in node_result.scalars().all()}
+        ev_result = await s.execute(
+            select(SkillEvidence).where(
+                SkillEvidence.skill_node_id.in_(list(nodes.keys()))
+            )
+        )
+        ev_lines = []
+        for ev in ev_result.scalars().all():
+            if not ev.user_context:
+                continue
+            node = nodes.get(ev.skill_node_id)
+            skill_name = node.skill_name if node else "?"
+            note = f"• {skill_name}: {ev.user_context}"
+            if ev.company:
+                note += f" (@ {ev.company}"
+                if ev.duration_months:
+                    note += f", {ev.duration_months}m"
+                note += ")"
+            ev_lines.append(note)
+        evidence_notes = "\n".join(ev_lines)
 
     print(f"\n  [generate] Job          : \"{title}\" @ {company}  fit={fit:.0f}%")
     print(f"  [generate] User         : Aman | verified skills: {skill_count} | evidence: {ev_count}")
@@ -255,7 +284,7 @@ async def _run_job(job_id: str, title: str, company: str, fit: float, ai: HireLo
 
             t0 = time.monotonic()
             try:
-                patch_output = await ai.patch_resume(resume_md, request)
+                patch_output = await ai.patch_resume(resume_md, request, evidence_notes=evidence_notes)
             except Exception as e:
                 print(f"  [patch] ✗ FAILED — {e}")
                 continue
@@ -268,6 +297,8 @@ async def _run_job(job_id: str, title: str, company: str, fit: float, ai: HireLo
             delta = after_len - before_len
 
             print(f"  [patch] ✓ Done in {elapsed:.1f}s — patch output: {len(patch_output)} chars")
+            if not patched_sections:
+                print(f"  [patch] Raw output        : {patch_output.strip()}")
             print(f"  [patch] Sections modified : {', '.join(patched_sections) if patched_sections else '(none detected)'}")
             print(f"  [patch] Resume length     : {before_len} → {after_len} chars  "
                   f"({'Δ+' + str(delta) if delta >= 0 else 'Δ' + str(delta)})")

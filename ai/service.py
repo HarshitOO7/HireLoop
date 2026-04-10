@@ -153,6 +153,13 @@ Return ONLY the JSON object. No text before or after the closing brace."""
 
 _TAILOR_SYSTEM = """You are an expert resume writer. Tailor resumes truthfully using only verified evidence.
 
+EDUCATION — NON-NEGOTIABLE RULE (read before anything else):
+The EDUCATION section must be copied verbatim from the <resume> block. Do not paraphrase, normalize,
+or simplify any credential. The exact string from the resume is the only correct output.
+  WRONG: "Postgraduate Degree, Information Technology"   ← fabricated
+  RIGHT: "Postgraduate Diploma, Computer Information Technology"  ← exact copy from resume
+A wrong credential type on a resume is fraud. Copy. Do not rewrite.
+
 HARD RULES:
 - Only include skills where status starts with "verified_" in the skill graph
 - Never invent accomplishments — use STAR format for all bullets
@@ -192,7 +199,7 @@ OUTPUT FORMAT (follow this section structure exactly):
 ## SKILLS
 **Category:** skills
 ## EDUCATION
-**Degree** | Year
+**[credential copied EXACTLY from resume — no rewording]** | Year
 *Institution*
 ## PROJECTS (tech roles only)
 **Name** | Year
@@ -350,12 +357,16 @@ RULES:
 - Do not output unchanged sections
 - Preserve all other formatting exactly
 - No invented content — only use what the candidate has verified
-- Never add metrics, technologies, or accomplishments not present in the original resume"""
+- If <evidence_notes> are present, you may draw on them to add verified content (e.g. a work experience
+  entry for a company mentioned in evidence). Never add anything not in the resume or evidence_notes.
+- Never add metrics, technologies, or accomplishments not present in the original resume or evidence_notes
+- If the requested change cannot be applied (content not in resume or evidence, or ambiguous):
+  output <section name="CANNOT_APPLY">Brief reason why.</section> — never output free text"""
 
 _PATCH_PROMPT = """<current_resume>
 {current_resume}
 </current_resume>
-
+{evidence_block}
 <edit_request>
 {user_request}
 </edit_request>
@@ -488,17 +499,29 @@ class HireLoopAI:
         logger.info("[tailor_resume] DONE %.2fs — output %d chars", time.monotonic() - t0, len(result))
         return result
 
-    async def patch_resume(self, current_resume: str, user_request: str) -> str:
+    async def patch_resume(
+        self,
+        current_resume: str,
+        user_request: str,
+        evidence_notes: str = "",
+    ) -> str:
         """Apply a targeted edit to an already-generated resume.
 
         Returns only the changed section(s) wrapped in <section name="..."> tags.
         Caller uses apply_patch() in resume/generator.py to splice back in.
+        evidence_notes: optional context from skill evidence — pass this so the AI can
+        add work experience entries or skills that are verified but absent from the current resume.
         """
-        logger.info("[patch_resume] START — resume %d chars  request=%r",
-                    len(current_resume), user_request[:120])
+        logger.info("[patch_resume] START — resume %d chars  request=%r  evidence=%d chars",
+                    len(current_resume), user_request[:120], len(evidence_notes))
         t0 = time.monotonic()
+        evidence_block = (
+            f"<evidence_notes>\n{evidence_notes[:2000]}\n</evidence_notes>\n"
+            if evidence_notes.strip() else ""
+        )
         prompt = _PATCH_PROMPT.format(
             current_resume=current_resume,
+            evidence_block=evidence_block,
             user_request=user_request[:600],   # safety cap — handler already enforces this
         )
         logger.info("[patch_resume] sending to %s (quality) — prompt %d chars",

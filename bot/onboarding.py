@@ -104,9 +104,9 @@ def _normalize_skill(name: str) -> str:
 # ── File text extraction ────────────────────────────────────────────────────
 
 def _extract_pdf(data: bytes) -> str:
-    import PyPDF2
-    reader = PyPDF2.PdfReader(io.BytesIO(data))
-    return "\n".join(page.extract_text() or "" for page in reader.pages)
+    import pdfplumber
+    with pdfplumber.open(io.BytesIO(data)) as pdf:
+        return "\n".join(page.extract_text() or "" for page in pdf.pages)
 
 
 def _extract_docx(data: bytes) -> str:

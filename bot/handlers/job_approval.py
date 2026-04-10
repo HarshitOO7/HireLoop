@@ -410,8 +410,44 @@ async def edit_resume_apply(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await thinking.edit_text("Resume not found. Regenerate via 📋 Pending Jobs.")
         return ConversationHandler.END
 
+    # Load evidence notes so patch can add verified content absent from the current resume
+    from sqlalchemy import select
+    from db.models import SkillEvidence, SkillNode, User
+    tg_id = str(update.effective_user.id)
+    evidence_notes = ""
+    async with AsyncSessionLocal() as s:
+        u = await s.execute(select(User).where(User.telegram_id == tg_id))
+        user_obj = u.scalar_one_or_none()
+        if user_obj:
+            node_result = await s.execute(
+                select(SkillNode).where(
+                    SkillNode.user_id == user_obj.id,
+                    SkillNode.status.like("verified_%"),
+                )
+            )
+            nodes = {n.id: n for n in node_result.scalars().all()}
+            ev_result = await s.execute(
+                select(SkillEvidence).where(
+                    SkillEvidence.skill_node_id.in_(list(nodes.keys()))
+                )
+            )
+            ev_lines = []
+            for ev in ev_result.scalars().all():
+                if not ev.user_context:
+                    continue
+                node = nodes.get(ev.skill_node_id)
+                skill_name = node.skill_name if node else "?"
+                note = f"• {skill_name}: {ev.user_context}"
+                if ev.company:
+                    note += f" (@ {ev.company}"
+                    if ev.duration_months:
+                        note += f", {ev.duration_months}m"
+                    note += ")"
+                ev_lines.append(note)
+            evidence_notes = "\n".join(ev_lines)
+
     try:
-        patch_output = await ai.patch_resume(app.resume_markdown, text)
+        patch_output = await ai.patch_resume(app.resume_markdown, text, evidence_notes=evidence_notes)
     except Exception as e:
         logger.error("[job_approval] patch_resume failed: %s", e)
         await thinking.edit_text("Edit failed — try rephrasing or try again.")

@@ -28,7 +28,7 @@ reportlab
 apscheduler
 
 # Resume parsing (input)
-pypdf2
+pdfplumber
 python-docx
 
 # Markdown processing
