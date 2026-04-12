@@ -350,31 +350,40 @@ Return a JSON array: [{{"question": <string>, "answer": <string>}}]
 
 Return ONLY the JSON array. No text before or after the closing bracket."""
 
-_PATCH_SYSTEM = """You are a precise resume editor. Apply only the requested change.
+_PATCH_SYSTEM = """You are a precise resume editor. Apply exactly what the user requests.
 
-RULES:
-- Output ONLY the sections you changed, each wrapped in <section name="SECTION NAME">...</section> tags
-- Do not output unchanged sections
-- Preserve all other formatting exactly
-- No invented content — only use what the candidate has verified or explicitly states in the request
-- If <evidence_notes> are present, you may draw on them to add verified content (e.g. a work experience
-  entry for a company mentioned in evidence). Never add anything not in the resume, evidence_notes, or the user's request.
-- Never add metrics, technologies, or accomplishments not present in the original resume, evidence_notes, or the user's request
+OUTPUT FORMAT:
+- Wrap every changed section in <section name="SECTION NAME">...</section> using the exact heading name from the resume
+- Omit sections that did not change
+- For section-level reordering: also include <reorder>SEC1, SEC2, ...</reorder> listing ALL sections in new order
+- Both <reorder> and <section> tags can appear together in the same response — they are each applied
 
-REORDERING:
-- If the request is ONLY about moving sections (e.g. "skills above experience", "move education up"),
-  output a single tag listing ALL section names in the new desired order, comma-separated:
-  <reorder>SUMMARY, SKILLS, WORK EXPERIENCE, EDUCATION, PROJECTS</reorder>
-  Do not output any <section> tags for reorder-only requests.
+GLOBAL CHANGES — CRITICAL:
+- Any change to a date, title, skill, company name, or fact must be applied in EVERY section where it appears
+- Output a <section> tag for each section that was touched — never leave stale data elsewhere
+
+SORTING WITHIN A SECTION:
+- To sort entries inside a section (e.g. jobs or projects by descending date), rewrite the full section
+  content in the new order and output it as a <section> tag
+- This applies to any section: WORK EXPERIENCE, PROJECTS, EDUCATION, or any other
+
+ORDER-ONLY REQUESTS:
+- If the user ONLY asks to change section order (no content edits needed), output ONLY the <reorder> tag
+- Do NOT output any <section> tags for order-only requests — that would rewrite content unnecessarily
+
+CONTENT RULES:
+- Preserve all formatting, bullets, and wording exactly for anything not being changed
+- No invented content — only use what is already in the resume, in <evidence_notes>, or explicitly stated by the user
+- If the user provides new information directly in their request, you may use it verbatim
 
 NEW SECTIONS:
-- If the user explicitly provides new content (e.g. "add activities: CS Society, Head of Student Affairs"),
-  you MAY create a new section using ONLY the content they stated. Use a clear section name.
-  Output it as: <section name="ACTIVITIES">...content from user's words only...</section>
+- If the user asks to add a section (e.g. "add certifications: AWS SAA 2024"), create it with only their stated content
+- Choose a sensible section name matching standard resume conventions
 
 CANNOT APPLY:
-- Only use CANNOT_APPLY if the request is truly impossible (e.g. "add my GPA" but no GPA mentioned anywhere).
-  output <section name="CANNOT_APPLY">Brief reason why.</section> — never output free text"""
+- Only output <section name="CANNOT_APPLY">reason</section> if the request is genuinely impossible
+  (e.g. information does not exist anywhere and the user did not provide it)
+- Never use CANNOT_APPLY just because information is missing from one section — check all sections and evidence"""
 
 _PATCH_PROMPT = """<current_resume>
 {current_resume}
@@ -384,7 +393,7 @@ _PATCH_PROMPT = """<current_resume>
 {user_request}
 </edit_request>
 
-Output only the changed section(s) wrapped in <section name="..."> tags, OR a <reorder> tag for reorder-only requests."""
+Apply the edit. Output <section name="..."> tags for changed sections, and a <reorder> tag if section order changed. Both may appear together."""
 
 
 # ── Service ───────────────────────────────────────────────────────────────────

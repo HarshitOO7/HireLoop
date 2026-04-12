@@ -181,7 +181,8 @@ def render_docx(markdown_text: str, output_path: str | Path) -> Path:
         p._element.getparent().remove(p._element)
 
     lines = markdown_text.splitlines()
-    first_line_done = False   # track whether we've seen the name yet
+    name_done    = False   # True after # Name line is rendered
+    contact_done = False   # True after the contact line is rendered (only one)
 
     for raw_line in lines:
         line = raw_line.rstrip()
@@ -203,11 +204,12 @@ def render_docx(markdown_text: str, output_path: str | Path) -> Path:
             run = p.add_run(name)
             run.bold      = True
             run.font.size = _NAME_PT
-            first_line_done = True
+            name_done = True
             continue
 
         # ── ## Section heading — bold ALL-CAPS + bottom border ───────────────
         if line.startswith("## "):
+            contact_done = True   # any section heading means header is over
             title = line[3:].strip().upper()
             p     = doc.add_paragraph()
             _spacing(p, before=6, after=1)
@@ -239,12 +241,14 @@ def render_docx(markdown_text: str, output_path: str | Path) -> Path:
             run.font.size = _BODY_PT
             continue
 
-        # ── Contact line (contains | separators, no leading **) — centered ───
-        if "|" in line and not line.startswith("**") and not first_line_done is False:
+        # ── Contact line — the single line right after the name (phone | email | links) ──
+        # Only render as centered contact if: name seen, contact not yet done, has | separators
+        if name_done and not contact_done and "|" in line and not line.startswith("**"):
             p = doc.add_paragraph()
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER
             _spacing(p, before=0, after=4)
             _add_contact_line(p, line, size=_BODY_PT)
+            contact_done = True
             continue
 
         # ── Everything else — inline parse (role lines, **Key:** val, etc.) ──

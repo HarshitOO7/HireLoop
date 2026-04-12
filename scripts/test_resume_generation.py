@@ -279,8 +279,8 @@ async def _run_job(job_id: str, title: str, company: str, fit: float, ai: HireLo
                 print("  (empty — skipping edit)")
                 continue
 
-            print(f"\n  [patch] User request : \"{request}\"")
-            print(f"  [patch] Calling patch_resume() via {ai._quality.provider_name} (quality)...")
+            print(f"\n  [patch] Request      : \"{request}\"")
+            print(f"  [patch] Sending to {ai._quality.provider_name} — thinking...")
 
             t0 = time.monotonic()
             try:
@@ -292,30 +292,44 @@ async def _run_job(job_id: str, title: str, company: str, fit: float, ai: HireLo
 
             patched_sections = _sections_patched(patch_output)
             cannot_apply = 'CANNOT_APPLY' in [s.upper() for s in patched_sections]
+            is_reorder    = bool(re.search(r'<reorder>', patch_output, re.IGNORECASE))
 
-            print(f"  [patch] ✓ Done in {elapsed:.1f}s — patch output: {len(patch_output)} chars")
+            print(f"  [patch] Done in {elapsed:.1f}s\n")
 
+            # ── Show what the AI decided to do ────────────────────────────────
             if cannot_apply:
                 reason_m = re.search(r'<section name="CANNOT_APPLY">(.*?)</section>',
                                      patch_output, re.DOTALL | re.IGNORECASE)
                 reason = reason_m.group(1).strip() if reason_m else "no reason given"
-                print(f"  [patch] ✗ Cannot apply — {reason}")
-                print(f"  [patch] Tip: provide the content directly in your request.")
-                continue  # resume unchanged — skip reprint
+                print(f"  [AI decision] Cannot apply this edit.")
+                print(f"  [AI reason  ] {reason}")
+                print(f"  [tip        ] Include the actual content in your request (e.g. 'add activities: CS Society 2022-2024, VP role').")
+                continue
+
+            if is_reorder:
+                order_m = re.search(r'<reorder>(.*?)</reorder>', patch_output, re.IGNORECASE | re.DOTALL)
+                new_order = order_m.group(1).strip() if order_m else "?"
+                print(f"  [AI decision] Reorder sections → {new_order}")
+
+            visible = [s for s in patched_sections if s.upper() != 'CANNOT_APPLY']
+            if visible:
+                print(f"  [AI decision] Edit section(s): {', '.join(visible)}")
+                _sep("AI patch output")
+                for m in re.finditer(r'<section name="([^"]+)">(.*?)</section>', patch_output, re.DOTALL):
+                    sec = m.group(1).strip()
+                    if sec.upper() == 'CANNOT_APPLY':
+                        continue
+                    content = m.group(2).strip()
+                    print(f"\n  ▶ {sec}\n")
+                    for line in content.splitlines():
+                        print(f"    {line}")
+                _sep()
 
             before_len = len(resume_md)
-            resume_md = apply_patch(resume_md, patch_output)
-            after_len = len(resume_md)
-            delta = after_len - before_len
-
-            if re.search(r'<reorder>', patch_output, re.IGNORECASE):
-                print(f"  [patch] Sections reordered")
-            elif not patched_sections:
-                print(f"  [patch] Raw output        : {patch_output.strip()}")
-            else:
-                visible = [s for s in patched_sections if s.upper() != 'CANNOT_APPLY']
-                print(f"  [patch] Sections modified : {', '.join(visible)}")
-            print(f"  [patch] Resume length     : {before_len} → {after_len} chars  "
+            resume_md  = apply_patch(resume_md, patch_output)
+            after_len  = len(resume_md)
+            delta      = after_len - before_len
+            print(f"\n  [applied] Resume length: {before_len} → {after_len} chars  "
                   f"({'Δ+' + str(delta) if delta >= 0 else 'Δ' + str(delta)})")
 
         elif choice == "s":

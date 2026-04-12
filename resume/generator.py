@@ -43,7 +43,7 @@ def apply_patch(current_md: str, patch_output: str) -> str:
     - <section name="NAME">...</section>  — replace or add a section
     - <section name="CANNOT_APPLY">...</section> — silently ignored (caller checks separately)
     """
-    # ── Reorder ───────────────────────────────────────────────────────────────
+    # ── Reorder (may coexist with <section> content patches) ─────────────────
     reorder_m = re.search(r'<reorder>(.*?)</reorder>', patch_output, re.IGNORECASE | re.DOTALL)
     if reorder_m:
         new_order = [s.strip().upper() for s in reorder_m.group(1).split(',')]
@@ -66,7 +66,8 @@ def apply_patch(current_md: str, patch_output: str) -> str:
         for key, (orig, content) in sections.items():
             if key not in placed:
                 parts.append(f"## {orig}\n{content}")
-        return '\n\n'.join(parts)
+        current_md = '\n\n'.join(parts)
+        # Fall through — also apply any <section> content patches in the same response
 
     # ── Section content patches ────────────────────────────────────────────────
     for m in re.finditer(r'<section name="([^"]+)">(.*?)</section>', patch_output, re.DOTALL):
