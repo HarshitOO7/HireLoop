@@ -38,14 +38,58 @@ def _compress_resume(text: str) -> str:
 def apply_patch(current_md: str, patch_output: str) -> str:
     """Splice AI-returned changed sections back into the current resume markdown.
 
-    The AI returns changed sections wrapped in <section name="SECTION NAME">...</section>.
-    Each matched section replaces the corresponding ## SECTION block in current_md.
+    Handles three cases:
+    - <reorder>SEC1, SEC2, ...</reorder>  — reorder sections without changing content
+    - <section name="NAME">...</section>  — replace or add a section
+    - <section name="CANNOT_APPLY">...</section> — silently ignored (caller checks separately)
     """
+    # ── Reorder ───────────────────────────────────────────────────────────────
+    reorder_m = re.search(r'<reorder>(.*?)</reorder>', patch_output, re.IGNORECASE | re.DOTALL)
+    if reorder_m:
+        new_order = [s.strip().upper() for s in reorder_m.group(1).split(',')]
+        # Extract header (everything before first ## section)
+        header_m = re.match(r'^(.*?)(?=\n## )', current_md, re.DOTALL)
+        header   = header_m.group(1).strip() if header_m else ''
+        # Extract all existing sections preserving original heading capitalisation
+        sections: dict[str, tuple[str, str]] = {}  # UPPER_NAME → (orig_heading, content)
+        for m in re.finditer(r'## ([^\n]+)\n(.*?)(?=\n## |\Z)', current_md, re.DOTALL):
+            key = m.group(1).strip().upper()
+            sections[key] = (m.group(1).strip(), m.group(2).strip())
+        # Rebuild in requested order, then append anything not mentioned
+        parts = [header] if header else []
+        placed: set[str] = set()
+        for sec in new_order:
+            if sec in sections:
+                orig, content = sections[sec]
+                parts.append(f"## {orig}\n{content}")
+                placed.add(sec)
+        for key, (orig, content) in sections.items():
+            if key not in placed:
+                parts.append(f"## {orig}\n{content}")
+        return '\n\n'.join(parts)
+
+    # ── Section content patches ────────────────────────────────────────────────
     for m in re.finditer(r'<section name="([^"]+)">(.*?)</section>', patch_output, re.DOTALL):
         section_name = m.group(1).strip().upper()
-        new_content  = m.group(2).strip()
+        if section_name == 'CANNOT_APPLY':
+            continue  # caller handles feedback
+        new_content = m.group(2).strip()
         pattern = rf"(## {re.escape(section_name)}\n)(.*?)(?=\n## |\Z)"
-        current_md = re.sub(pattern, rf"\g<1>{new_content}\n\n", current_md, flags=re.DOTALL)
+        if re.search(pattern, current_md, re.DOTALL):
+            # Section exists — replace content in-place
+            current_md = re.sub(pattern, rf"\g<1>{new_content}\n\n", current_md, flags=re.DOTALL)
+        else:
+            # New section — insert before EDUCATION/PROJECTS if present, else append
+            title_case = section_name.title()
+            inserted = False
+            for anchor in ['## EDUCATION', '## PROJECTS']:
+                if anchor in current_md:
+                    current_md = current_md.replace(
+                        anchor, f"## {title_case}\n{new_content}\n\n{anchor}", 1)
+                    inserted = True
+                    break
+            if not inserted:
+                current_md = current_md.rstrip() + f"\n\n## {title_case}\n{new_content}"
     return current_md
 
 # ── Contact extraction ─────────────────────────────────────────────────────────

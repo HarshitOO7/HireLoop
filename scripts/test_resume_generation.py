@@ -1,7 +1,7 @@
 """
 Resume generation end-to-end test harness.
 
-Uses Aman's real DB data (copied to a safe test DB — never touches hireloop.db).
+Uses Harshit's real DB data (copied to a safe test DB — never touches hireloop.db).
 Runs the full prod pipeline: generate_resume → interactive approve/edit loop → render_docx.
 
 Usage:
@@ -67,13 +67,13 @@ from resume.generator import generate_resume, apply_patch
 from resume.docx_export import render_docx
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-AMAN_USER_ID = "c80cdddc-f3a4-47a0-98e1-867f16b2df0d"
+HARSHIT_USER_ID = "1e1cdd48-7bcb-4589-a949-a43e920587e5"
 
-# Pre-selected jobs with good fit scores — all belong to Aman
+# Pre-selected jobs with good fit scores — all belong to Harshit
 DEFAULT_JOBS = [
-    ("26dbf811-44ac-40fa-bf32-ff21bc7cca65", "Intern, Full Stack Developer", "Autodesk",          78.0),
-    ("a5ed28b7-afcb-4178-8269-5f073707d61c", "Junior Full Stack Developer",  "Armour Payments",   74.0),
-    ("fc4088c2-eb4d-4ee9-8f42-fb472d6d4426", "UI / Front-End Developer",     "FLiiP",             72.0),
+    ("a78d5fb2-9622-429b-8ac8-28aac790e539", "Associate SWE New Grad", "Capital One", 82.0),
+    ("6b27e199-408b-47b1-82d3-f1552eb3e19b", "Senior Software Engineer", "ExaCare AI",  78.0),
+    ("bcb19409-3588-4525-b79d-d774a06b37fd", "Software Engineer",        "Relay",       72.0),
 ]
 
 AUTO_MODE = "--all" in sys.argv
@@ -111,18 +111,18 @@ async def _print_profile(session):
     from sqlalchemy import select, func
     from db.models import User, SkillNode, SkillEvidence
 
-    user = (await session.execute(select(User).where(User.id == AMAN_USER_ID))).scalar_one()
+    user = (await session.execute(select(User).where(User.id == HARSHIT_USER_ID))).scalar_one()
     skill_count = (await session.execute(
         select(func.count()).select_from(SkillNode)
-        .where(SkillNode.user_id == AMAN_USER_ID, SkillNode.status.like("verified_%"))
+        .where(SkillNode.user_id == HARSHIT_USER_ID, SkillNode.status.like("verified_%"))
     )).scalar()
     ev_count = (await session.execute(
         select(func.count()).select_from(SkillEvidence)
-        .join(SkillNode).where(SkillNode.user_id == AMAN_USER_ID)
+        .join(SkillNode).where(SkillNode.user_id == HARSHIT_USER_ID)
     )).scalar()
 
     filters = user.filters or {}
-    _sep("Aman's Profile")
+    _sep("Harshit's Profile")
     print(f"  Name              : {user.name}")
     print(f"  Verified skills   : {skill_count}")
     print(f"  Evidence entries  : {ev_count}")
@@ -188,16 +188,16 @@ async def _run_job(job_id: str, title: str, company: str, fit: float, ai: HireLo
 
         skill_count = (await s.execute(
             select(func.count()).select_from(SkillNode)
-            .where(SkillNode.user_id == AMAN_USER_ID, SkillNode.status.like("verified_%"))
+            .where(SkillNode.user_id == HARSHIT_USER_ID, SkillNode.status.like("verified_%"))
         )).scalar()
 
         ev_count = (await s.execute(
             select(func.count()).select_from(SkillEvidence)
-            .join(SkillNode).where(SkillNode.user_id == AMAN_USER_ID)
+            .join(SkillNode).where(SkillNode.user_id == HARSHIT_USER_ID)
         )).scalar()
 
         from db.models import User
-        user = (await s.execute(select(User).where(User.id == AMAN_USER_ID))).scalar_one()
+        user = (await s.execute(select(User).where(User.id == HARSHIT_USER_ID))).scalar_one()
         filters = user.filters or {}
         work_history = filters.get("work_history", [])
         target_role = filters.get("role", "")
@@ -206,7 +206,7 @@ async def _run_job(job_id: str, title: str, company: str, fit: float, ai: HireLo
         # Gather evidence notes for patch context
         node_result = await s.execute(
             select(SkillNode).where(
-                SkillNode.user_id == AMAN_USER_ID,
+                SkillNode.user_id == HARSHIT_USER_ID,
                 SkillNode.status.like("verified_%"),
             )
         )
@@ -232,13 +232,13 @@ async def _run_job(job_id: str, title: str, company: str, fit: float, ai: HireLo
         evidence_notes = "\n".join(ev_lines)
 
     print(f"\n  [generate] Job          : \"{title}\" @ {company}  fit={fit:.0f}%")
-    print(f"  [generate] User         : Aman | verified skills: {skill_count} | evidence: {ev_count}")
+    print(f"  [generate] User         : Harshit | verified skills: {skill_count} | evidence: {ev_count}")
     print(f"  [generate] Section order: {' → '.join(section_order)}")
     print(f"  [generate] Instructions : {filters.get('resume_instructions') or '(none)'}")
     print(f"  [generate] Calling tailor_resume() via {ai._quality.provider_name} (quality)...")
 
     t0 = time.monotonic()
-    app = await generate_resume(job_id, AMAN_USER_ID, ai)
+    app = await generate_resume(job_id, HARSHIT_USER_ID, ai)
     elapsed = time.monotonic() - t0
 
     if not app or not app.resume_markdown:
@@ -291,15 +291,30 @@ async def _run_job(job_id: str, title: str, company: str, fit: float, ai: HireLo
             elapsed = time.monotonic() - t0
 
             patched_sections = _sections_patched(patch_output)
+            cannot_apply = 'CANNOT_APPLY' in [s.upper() for s in patched_sections]
+
+            print(f"  [patch] ✓ Done in {elapsed:.1f}s — patch output: {len(patch_output)} chars")
+
+            if cannot_apply:
+                reason_m = re.search(r'<section name="CANNOT_APPLY">(.*?)</section>',
+                                     patch_output, re.DOTALL | re.IGNORECASE)
+                reason = reason_m.group(1).strip() if reason_m else "no reason given"
+                print(f"  [patch] ✗ Cannot apply — {reason}")
+                print(f"  [patch] Tip: provide the content directly in your request.")
+                continue  # resume unchanged — skip reprint
+
             before_len = len(resume_md)
             resume_md = apply_patch(resume_md, patch_output)
             after_len = len(resume_md)
             delta = after_len - before_len
 
-            print(f"  [patch] ✓ Done in {elapsed:.1f}s — patch output: {len(patch_output)} chars")
-            if not patched_sections:
+            if re.search(r'<reorder>', patch_output, re.IGNORECASE):
+                print(f"  [patch] Sections reordered")
+            elif not patched_sections:
                 print(f"  [patch] Raw output        : {patch_output.strip()}")
-            print(f"  [patch] Sections modified : {', '.join(patched_sections) if patched_sections else '(none detected)'}")
+            else:
+                visible = [s for s in patched_sections if s.upper() != 'CANNOT_APPLY']
+                print(f"  [patch] Sections modified : {', '.join(visible)}")
             print(f"  [patch] Resume length     : {before_len} → {after_len} chars  "
                   f"({'Δ+' + str(delta) if delta >= 0 else 'Δ' + str(delta)})")
 

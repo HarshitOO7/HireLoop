@@ -356,11 +356,24 @@ RULES:
 - Output ONLY the sections you changed, each wrapped in <section name="SECTION NAME">...</section> tags
 - Do not output unchanged sections
 - Preserve all other formatting exactly
-- No invented content — only use what the candidate has verified
+- No invented content — only use what the candidate has verified or explicitly states in the request
 - If <evidence_notes> are present, you may draw on them to add verified content (e.g. a work experience
-  entry for a company mentioned in evidence). Never add anything not in the resume or evidence_notes.
-- Never add metrics, technologies, or accomplishments not present in the original resume or evidence_notes
-- If the requested change cannot be applied (content not in resume or evidence, or ambiguous):
+  entry for a company mentioned in evidence). Never add anything not in the resume, evidence_notes, or the user's request.
+- Never add metrics, technologies, or accomplishments not present in the original resume, evidence_notes, or the user's request
+
+REORDERING:
+- If the request is ONLY about moving sections (e.g. "skills above experience", "move education up"),
+  output a single tag listing ALL section names in the new desired order, comma-separated:
+  <reorder>SUMMARY, SKILLS, WORK EXPERIENCE, EDUCATION, PROJECTS</reorder>
+  Do not output any <section> tags for reorder-only requests.
+
+NEW SECTIONS:
+- If the user explicitly provides new content (e.g. "add activities: CS Society, Head of Student Affairs"),
+  you MAY create a new section using ONLY the content they stated. Use a clear section name.
+  Output it as: <section name="ACTIVITIES">...content from user's words only...</section>
+
+CANNOT APPLY:
+- Only use CANNOT_APPLY if the request is truly impossible (e.g. "add my GPA" but no GPA mentioned anywhere).
   output <section name="CANNOT_APPLY">Brief reason why.</section> — never output free text"""
 
 _PATCH_PROMPT = """<current_resume>
@@ -371,7 +384,7 @@ _PATCH_PROMPT = """<current_resume>
 {user_request}
 </edit_request>
 
-Output only the changed section(s) wrapped in <section name="..."> tags."""
+Output only the changed section(s) wrapped in <section name="..."> tags, OR a <reorder> tag for reorder-only requests."""
 
 
 # ── Service ───────────────────────────────────────────────────────────────────
