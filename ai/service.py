@@ -431,6 +431,13 @@ CANNOT APPLY:
   (e.g. information does not exist anywhere and the user did not provide it)
 - Never use CANNOT_APPLY just because information is missing from one section — check all sections and evidence
 
+STATIC FACT DETECTION:
+- If you changed any static fact (a date, company name, institution name, or credential type),
+  append <save_hint>one-line plain-English description of the static change</save_hint> at the very end
+- Do NOT add this tag for bullet rewrites, phrasing improvements, role title changes, or skill edits
+- Examples that warrant a tag: "Racktrendz start date: Mar 2024", "Douglas College graduation: 2023"
+- Examples that do NOT: "rewrote summary bullets", "changed role title to Automation Engineer"
+
 WRITING STYLE — NON-NEGOTIABLE:
 - No em dashes (—). Use a comma, colon, or rewrite the sentence.
 - Never use: spearheaded, leveraged, utilized, orchestrated, championed, pioneered,

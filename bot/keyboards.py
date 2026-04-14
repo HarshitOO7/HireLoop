@@ -183,6 +183,20 @@ def job_approval_keyboard(job_id: str) -> InlineKeyboardMarkup:
     ])
 
 
+def save_globally_keyboard(job_id: str, job_url: str | None) -> InlineKeyboardMarkup:
+    """Keyboard shown when AI detects a static fact change worth saving globally."""
+    rows = [
+        [
+            InlineKeyboardButton("📅 Dates/names only",        callback_data=f"save_global_dates_{job_id}"),
+            InlineKeyboardButton("📅+💼 Dates & role title",   callback_data=f"save_global_all_{job_id}"),
+        ],
+        [
+            InlineKeyboardButton("❌ This resume only",        callback_data=f"save_global_skip_{job_id}"),
+        ],
+    ]
+    return InlineKeyboardMarkup(rows)
+
+
 def post_delivery_keyboard(job_id: str, job_url: str | None) -> InlineKeyboardMarkup:
     """Keyboard shown after resume files are delivered."""
     rows = [

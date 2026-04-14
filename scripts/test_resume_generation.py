@@ -63,14 +63,65 @@ load_dotenv()
 
 from ai.factory import AIFactory
 from ai.service import HireLoopAI
-from resume.generator import generate_resume, apply_patch
+from resume.generator import generate_resume, apply_patch, extract_save_hint, save_globally
 from resume.docx_export import render_docx
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-HARSHIT_USER_ID = "1e1cdd48-7bcb-4589-a949-a43e920587e5"
 TOP_N_JOBS = 10   # how many top-scored jobs to show in the menu
+AUTO_MODE  = "--all" in sys.argv
 
-AUTO_MODE = "--all" in sys.argv
+
+# ── User auto-detection ───────────────────────────────────────────────────────
+
+def _pick_user() -> tuple[str, str]:
+    """Pick a test user from the DB.
+
+    Returns (user_id, name).  Prefers users that have:
+      1. base_resume_markdown set
+      2. verified skill nodes
+      3. jobs with a fit score
+
+    If multiple candidates qualify, shows a numbered picker.
+    Exits with an error if no user is ready.
+    """
+    import sqlite3, json
+    conn = sqlite3.connect(_PROD_DB)
+    cur  = conn.cursor()
+
+    cur.execute("SELECT id, name FROM users WHERE base_resume_markdown IS NOT NULL AND base_resume_markdown != ''")
+    users_with_resume = cur.fetchall()
+
+    candidates = []
+    for uid, name in users_with_resume:
+        cur.execute("SELECT COUNT(*) FROM skill_nodes WHERE user_id = ? AND status LIKE 'verified_%'", (uid,))
+        skills = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM jobs WHERE user_id = ? AND fit_score IS NOT NULL", (uid,))
+        jobs = cur.fetchone()[0]
+        if skills > 0 and jobs > 0:
+            candidates.append((uid, name, skills, jobs))
+
+    conn.close()
+
+    if not candidates:
+        print("[ERROR] No user in the DB is ready to test.")
+        print("  A user needs: base resume uploaded + verified skills + at least one scored job.")
+        sys.exit(1)
+
+    if len(candidates) == 1:
+        uid, name, skills, jobs = candidates[0]
+        print(f"  Auto-selected user: {name} ({skills} skills, {jobs} jobs)")
+        return uid, name
+
+    # Multiple candidates — show picker
+    print("\n  Multiple users available — pick one:")
+    for i, (uid, name, skills, jobs) in enumerate(candidates, 1):
+        print(f"  [{i}] {name:<20} {skills} skills  {jobs} jobs  ({uid[:8]}...)")
+    while True:
+        choice = input(f"  Pick [1-{len(candidates)}]: ").strip()
+        if choice.isdigit() and 1 <= int(choice) <= len(candidates):
+            uid, name, _, _ = candidates[int(choice) - 1]
+            return uid, name
+        print("  Invalid — try again.")
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -101,22 +152,22 @@ def _print_resume(md: str):
 
 # ── Profile summary ───────────────────────────────────────────────────────────
 
-async def _print_profile(session):
+async def _print_profile(session, user_id: str, user_name: str):
     from sqlalchemy import select, func
     from db.models import User, SkillNode, SkillEvidence
 
-    user = (await session.execute(select(User).where(User.id == HARSHIT_USER_ID))).scalar_one()
+    user = (await session.execute(select(User).where(User.id == user_id))).scalar_one()
     skill_count = (await session.execute(
         select(func.count()).select_from(SkillNode)
-        .where(SkillNode.user_id == HARSHIT_USER_ID, SkillNode.status.like("verified_%"))
+        .where(SkillNode.user_id == user_id, SkillNode.status.like("verified_%"))
     )).scalar()
     ev_count = (await session.execute(
         select(func.count()).select_from(SkillEvidence)
-        .join(SkillNode).where(SkillNode.user_id == HARSHIT_USER_ID)
+        .join(SkillNode).where(SkillNode.user_id == user_id)
     )).scalar()
 
     filters = user.filters or {}
-    _sep("Harshit's Profile")
+    _sep(f"{user_name}'s Profile")
     print(f"  Name              : {user.name}")
     print(f"  Verified skills   : {skill_count}")
     print(f"  Evidence entries  : {ev_count}")
@@ -129,14 +180,14 @@ async def _print_profile(session):
 
 # ── Job menu ──────────────────────────────────────────────────────────────────
 
-async def _pick_jobs(session) -> list[tuple]:
+async def _pick_jobs(session, user_id: str) -> list[tuple]:
     """Show job menu pulled live from DB, return selected (job_id, title, company, fit_score) tuples."""
     from sqlalchemy import select
     from db.models import Job
 
     rows = (await session.execute(
         select(Job)
-        .where(Job.user_id == HARSHIT_USER_ID, Job.fit_score.isnot(None))
+        .where(Job.user_id == user_id, Job.fit_score.isnot(None))
         .order_by(Job.fit_score.desc())
         .limit(TOP_N_JOBS)
     )).scalars().all()
@@ -166,7 +217,7 @@ async def _pick_jobs(session) -> list[tuple]:
 
 # ── Core: generate + interactive loop ─────────────────────────────────────────
 
-async def _run_job(job_id: str, title: str, company: str, fit: float, ai: HireLoopAI):
+async def _run_job(job_id: str, title: str, company: str, fit: float, ai: HireLoopAI, user_id: str, user_name: str):
     _sep(f"Job: {title} @ {company}  ({fit:.0f}%)", char="═")
 
     # ── Pre-generation log ────────────────────────────────────────────────────
@@ -184,16 +235,16 @@ async def _run_job(job_id: str, title: str, company: str, fit: float, ai: HireLo
 
         skill_count = (await s.execute(
             select(func.count()).select_from(SkillNode)
-            .where(SkillNode.user_id == HARSHIT_USER_ID, SkillNode.status.like("verified_%"))
+            .where(SkillNode.user_id == user_id, SkillNode.status.like("verified_%"))
         )).scalar()
 
         ev_count = (await s.execute(
             select(func.count()).select_from(SkillEvidence)
-            .join(SkillNode).where(SkillNode.user_id == HARSHIT_USER_ID)
+            .join(SkillNode).where(SkillNode.user_id == user_id)
         )).scalar()
 
         from db.models import User
-        user = (await s.execute(select(User).where(User.id == HARSHIT_USER_ID))).scalar_one()
+        user = (await s.execute(select(User).where(User.id == user_id))).scalar_one()
         filters = user.filters or {}
         work_history = filters.get("work_history", [])
         target_role = filters.get("role", "")
@@ -202,7 +253,7 @@ async def _run_job(job_id: str, title: str, company: str, fit: float, ai: HireLo
         # Gather evidence notes for patch context
         node_result = await s.execute(
             select(SkillNode).where(
-                SkillNode.user_id == HARSHIT_USER_ID,
+                SkillNode.user_id == user_id,
                 SkillNode.status.like("verified_%"),
             )
         )
@@ -228,13 +279,13 @@ async def _run_job(job_id: str, title: str, company: str, fit: float, ai: HireLo
         evidence_notes = "\n".join(ev_lines)
 
     print(f"\n  [generate] Job          : \"{title}\" @ {company}  fit={fit:.0f}%")
-    print(f"  [generate] User         : Harshit | verified skills: {skill_count} | evidence: {ev_count}")
+    print(f"  [generate] User         : {user_name} | verified skills: {skill_count} | evidence: {ev_count}")
     print(f"  [generate] Section order: {' → '.join(section_order)}")
     print(f"  [generate] Instructions : {filters.get('resume_instructions') or '(none)'}")
     print(f"  [generate] Calling tailor_resume() via {ai._quality.provider_name} (quality)...")
 
     t0 = time.monotonic()
-    app = await generate_resume(job_id, HARSHIT_USER_ID, ai)
+    app = await generate_resume(job_id, user_id, ai)
     elapsed = time.monotonic() - t0
 
     if not app or not app.resume_markdown:
@@ -259,14 +310,14 @@ async def _run_job(job_id: str, title: str, company: str, fit: float, ai: HireLo
 
         if AUTO_MODE:
             # Non-interactive: just save the DOCX and move on
-            _save_docx(resume_md, job_id, title)
+            _save_docx(resume_md, job_id, title, user_name)
             return
 
         print("\n  [L] Looks good    [E] Edit    [S] Skip to next job")
         choice = input("  > ").strip().lower()
 
         if choice == "l":
-            _save_docx(resume_md, job_id, title)
+            _save_docx(resume_md, job_id, title, user_name)
             return
 
         elif choice == "e":
@@ -328,6 +379,18 @@ async def _run_job(job_id: str, title: str, company: str, fit: float, ai: HireLo
             print(f"\n  [applied] Resume length: {before_len} → {after_len} chars  "
                   f"({'Δ+' + str(delta) if delta >= 0 else 'Δ' + str(delta)})")
 
+            # ── Save globally? (only if AI detected a static fact change) ────────
+            hint = extract_save_hint(patch_output)
+            if hint:
+                print(f"\n  [💾] Static fact detected: \"{hint}\"")
+                print(f"  Save globally so future resumes use it automatically?")
+                print(f"  [D] Dates/names only  [A] All (incl. role title)  [N] No")
+                save_choice = input("  > ").strip().lower()
+                if save_choice in ("d", "a"):
+                    include_roles = save_choice == "a"
+                    await save_globally(user_id, patch_output, resume_md, include_role_titles=include_roles)
+                    print(f"  [✓] Saved globally{'  (including role title)' if include_roles else ''}")
+
         elif choice == "s":
             print("  Skipping.")
             return
@@ -336,9 +399,10 @@ async def _run_job(job_id: str, title: str, company: str, fit: float, ai: HireLo
             print("  Invalid — try L, E, or S.")
 
 
-def _save_docx(resume_md: str, job_id: str, title: str):
+def _save_docx(resume_md: str, job_id: str, title: str, user_name: str):
     slug = re.sub(r"[^\w]+", "_", title.lower())[:30]
-    out_path = Path("resume/output") / f"aman_test_{slug}_{job_id[:6]}.docx"
+    name_slug = re.sub(r"[^\w]+", "_", user_name.lower())[:12]
+    out_path = Path("resume/output") / f"{name_slug}_test_{slug}_{job_id[:6]}.docx"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     render_docx(resume_md, out_path)
     size_kb = out_path.stat().st_size / 1024
@@ -350,6 +414,8 @@ def _save_docx(resume_md: str, job_id: str, title: str):
 async def main():
     _sep("HireLoop — Resume Generation E2E Test", char="═", width=60)
 
+    user_id, user_name = _pick_user()
+
     fast    = AIFactory.create_fast()
     quality = AIFactory.create_quality()
     ai      = HireLoopAI(fast_provider=fast, quality_provider=quality)
@@ -360,14 +426,14 @@ async def main():
 
     from db.session import AsyncSessionLocal
     async with AsyncSessionLocal() as session:
-        await _print_profile(session)
-        selected_jobs = await _pick_jobs(session)
+        await _print_profile(session, user_id, user_name)
+        selected_jobs = await _pick_jobs(session, user_id)
 
     if not selected_jobs:
         print("\n  Nothing to run. Exiting.")
     else:
         for job_id, title, company, fit in selected_jobs:
-            await _run_job(job_id, title, company, fit, ai)
+            await _run_job(job_id, title, company, fit, ai, user_id, user_name)
 
     print(f"\n  [info] Test DB kept at {_TEST_DB} — delete manually when done testing.")
     _sep("Done", char="═")

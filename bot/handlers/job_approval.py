@@ -50,6 +50,7 @@ from bot.keyboards import (
     cover_letter_ask_keyboard,
     post_delivery_keyboard,
     resume_delivery_keyboard,
+    save_globally_keyboard,
 )
 from db.models import Application, Job
 from db.session import AsyncSessionLocal
@@ -453,7 +454,7 @@ async def edit_resume_apply(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await thinking.edit_text("Edit failed — try rephrasing or try again.")
         return EDIT_AWAITING_REQUEST
 
-    from resume.generator import apply_patch
+    from resume.generator import apply_patch, extract_save_hint, save_globally
     updated_md = apply_patch(app.resume_markdown, patch_output)
 
     # Persist updated markdown
@@ -478,11 +479,80 @@ async def edit_resume_apply(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return EDIT_AWAITING_REQUEST
 
     url = job.url if job else None
-    await thinking.edit_text(
-        "Updated! Anything else?",
-        reply_markup=post_delivery_keyboard(job_id, url),
+
+    # ── Save globally? (only when AI detected a static fact change) ───────────
+    hint = extract_save_hint(patch_output)
+    if hint and user_obj:
+        context.user_data["pending_save_globally"] = {
+            "user_id":      user_obj.id,
+            "patch_output": patch_output,
+            "resume_md":    updated_md,
+        }
+        await thinking.edit_text(
+            f"Updated! ✏️\n\n"
+            f"💾 Static fact detected: _{_md(hint)}_\n"
+            f"Save globally so all future resumes use it automatically?",
+            parse_mode="Markdown",
+            reply_markup=save_globally_keyboard(job_id, url),
+        )
+    else:
+        await thinking.edit_text(
+            "Updated! Anything else?",
+            reply_markup=post_delivery_keyboard(job_id, url),
+        )
+    return EDIT_AWAITING_REQUEST
+
+
+async def save_globally_dates(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query  = update.callback_query
+    await _safe_answer(query)
+    job_id = query.data.split("save_global_dates_", 1)[1]
+    await _do_save_globally(context, include_roles=False)
+    job = await _load_job(job_id)
+    await query.edit_message_text(
+        "✅ Saved! Future resumes will use the updated facts.\n\nAnything else?",
+        reply_markup=post_delivery_keyboard(job_id, job.url if job else None),
     )
     return EDIT_AWAITING_REQUEST
+
+
+async def save_globally_all(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query  = update.callback_query
+    await _safe_answer(query)
+    job_id = query.data.split("save_global_all_", 1)[1]
+    await _do_save_globally(context, include_roles=True)
+    job = await _load_job(job_id)
+    await query.edit_message_text(
+        "✅ Saved (including role title)! Future resumes will use the updated facts.\n\nAnything else?",
+        reply_markup=post_delivery_keyboard(job_id, job.url if job else None),
+    )
+    return EDIT_AWAITING_REQUEST
+
+
+async def save_globally_skip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query  = update.callback_query
+    await _safe_answer(query)
+    job_id = query.data.split("save_global_skip_", 1)[1]
+    context.user_data.pop("pending_save_globally", None)
+    job = await _load_job(job_id)
+    await query.edit_message_text(
+        "Got it — kept for this resume only. Anything else?",
+        reply_markup=post_delivery_keyboard(job_id, job.url if job else None),
+    )
+    return EDIT_AWAITING_REQUEST
+
+
+async def _do_save_globally(context, include_roles: bool) -> None:
+    data = context.user_data.pop("pending_save_globally", None)
+    if not data:
+        return
+    from resume.generator import save_globally
+    await save_globally(
+        data["user_id"],
+        data["patch_output"],
+        data["resume_md"],
+        include_role_titles=include_roles,
+    )
 
 
 # ── My Applications ───────────────────────────────────────────────────────────
@@ -591,16 +661,16 @@ async def app_cl(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 def get_job_approval_handlers() -> list:
     return [
-        CallbackQueryHandler(cl_yes,       pattern=r"^cl_yes_"),
-        CallbackQueryHandler(cl_no,        pattern=r"^cl_no_"),
-        CallbackQueryHandler(deliver_docx, pattern=r"^deliver_docx_"),
-        CallbackQueryHandler(deliver_pdf,  pattern=r"^deliver_pdf_"),
-        CallbackQueryHandler(deliver_both, pattern=r"^deliver_both_"),
-        CallbackQueryHandler(edit_done,    pattern=r"^edit_done_"),
+        CallbackQueryHandler(cl_yes,              pattern=r"^cl_yes_"),
+        CallbackQueryHandler(cl_no,               pattern=r"^cl_no_"),
+        CallbackQueryHandler(deliver_docx,        pattern=r"^deliver_docx_"),
+        CallbackQueryHandler(deliver_pdf,         pattern=r"^deliver_pdf_"),
+        CallbackQueryHandler(deliver_both,        pattern=r"^deliver_both_"),
+        CallbackQueryHandler(edit_done,           pattern=r"^edit_done_"),
         # app history re-downloads
-        CallbackQueryHandler(app_docx,     pattern=r"^app_docx_"),
-        CallbackQueryHandler(app_pdf,      pattern=r"^app_pdf_"),
-        CallbackQueryHandler(app_cl,       pattern=r"^app_cl_"),
+        CallbackQueryHandler(app_docx,            pattern=r"^app_docx_"),
+        CallbackQueryHandler(app_pdf,             pattern=r"^app_pdf_"),
+        CallbackQueryHandler(app_cl,              pattern=r"^app_cl_"),
     ]
 
 
@@ -613,6 +683,10 @@ def build_resume_edit_handler() -> ConversationHandler:
         states={
             EDIT_AWAITING_REQUEST: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, edit_resume_apply),
+                # Save globally callbacks (appear mid-conversation after a patch)
+                CallbackQueryHandler(save_globally_dates, pattern=r"^save_global_dates_"),
+                CallbackQueryHandler(save_globally_all,   pattern=r"^save_global_all_"),
+                CallbackQueryHandler(save_globally_skip,  pattern=r"^save_global_skip_"),
             ],
         },
         fallbacks=[],

@@ -93,6 +93,103 @@ def apply_patch(current_md: str, patch_output: str) -> str:
                 current_md = current_md.rstrip() + f"\n\n## {title_case}\n{new_content}"
     return current_md
 
+# ── Save globally ─────────────────────────────────────────────────────────────
+
+def extract_save_hint(patch_output: str) -> str | None:
+    """Return the <save_hint> text if the AI flagged a static fact change, else None."""
+    m = re.search(r'<save_hint>(.*?)</save_hint>', patch_output, re.DOTALL | re.IGNORECASE)
+    return m.group(1).strip() if m else None
+
+
+def _parse_work_history_from_md(work_exp_md: str) -> list[dict]:
+    """Parse WORK EXPERIENCE markdown into structured entries.
+
+    Returns list of {company, start_date, end_date, role_title}.
+    role_title is included so callers can optionally save it.
+    """
+    entries = []
+    # Match: **Role Title** | Date Range  followed by  *Company*
+    for m in re.finditer(
+        r'\*\*(.+?)\*\*(?:\s*\|\s*(.+?))?\s*\n\s*\*(.+?)\*',
+        work_exp_md,
+    ):
+        role_title  = m.group(1).strip()
+        date_string = (m.group(2) or "").strip()
+        company     = m.group(3).strip()
+        start_date, end_date = None, None
+        if "–" in date_string:
+            parts      = date_string.split("–", 1)
+            start_date = parts[0].strip() or None
+            end_date   = parts[1].strip() or None
+        elif date_string:
+            end_date = date_string
+        entries.append({
+            "company":    company,
+            "role_title": role_title,
+            "start_date": start_date,
+            "end_date":   end_date,
+        })
+    return entries
+
+
+async def save_globally(
+    user_id: str,
+    patch_output: str,
+    updated_resume_md: str,
+    include_role_titles: bool = False,
+) -> None:
+    """Persist static facts from a patch back to the user's source data.
+
+    Two writes (single transaction per DB session):
+    1. user.base_resume_markdown — apply the patched sections so future generations
+       always see the corrected facts as ground truth.
+    2. user.filters["work_history"] — upsert any WORK EXPERIENCE entries with
+       start_date/end_date (and optionally role_title).
+    """
+    import json
+    from sqlalchemy import select
+    from db.models import User
+    from db.session import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            user = (await session.execute(
+                select(User).where(User.id == user_id)
+            )).scalar_one_or_none()
+            if not user:
+                logger.warning("[save_globally] user %s not found", user_id)
+                return
+
+            # 1. Update base_resume_markdown with the patched sections
+            if user.base_resume_markdown:
+                user.base_resume_markdown = apply_patch(user.base_resume_markdown, patch_output)
+
+            # 2. Upsert work_history from WORK EXPERIENCE section in the patch
+            we_match = re.search(
+                r'<section name="WORK EXPERIENCE">(.*?)</section>',
+                patch_output, re.DOTALL | re.IGNORECASE,
+            )
+            if we_match:
+                parsed = _parse_work_history_from_md(we_match.group(1))
+                filters = dict(user.filters or {})
+                wh = list(filters.get("work_history") or [])
+                wh_map = {e["company"].lower(): e for e in wh}
+                for entry in parsed:
+                    key     = entry["company"].lower()
+                    existing = wh_map.get(key, {})
+                    updated  = dict(existing)
+                    updated["company"]    = entry["company"]
+                    updated["start_date"] = entry["start_date"] or existing.get("start_date")
+                    updated["end_date"]   = entry["end_date"]   or existing.get("end_date")
+                    if include_role_titles and entry["role_title"]:
+                        updated["role_title"] = entry["role_title"]
+                    wh_map[key] = updated
+                filters["work_history"] = list(wh_map.values())
+                user.filters = filters
+
+    logger.info("[save_globally] saved static facts for user %s  role_titles=%s", user_id, include_role_titles)
+
+
 # ── Contact extraction ─────────────────────────────────────────────────────────
 
 _RE_EMAIL    = re.compile(r"[\w.+-]+@[\w-]+\.[a-z]{2,}", re.IGNORECASE)
@@ -255,16 +352,28 @@ async def generate_resume(
             if ev.company:
                 _work_ev.setdefault(ev.company, []).append(ev)
 
+        # Build lookup from user.filters["work_history"] — used to fill in missing
+        # role/dates for skill-verified companies (e.g. onboarded before date capture)
+        _wh_lookup = {
+            e["company"].lower(): e
+            for e in (filters.get("work_history") or [])
+            if e.get("company")
+        }
+
         _synth_lines: list[str] = []
         for company, evs in _work_ev.items():
-            role      = next((e.role_title     for e in evs if e.role_title),     None)
-            duration  = next((e.duration_months for e in evs if e.duration_months), None)
-            last_year = next((e.last_used_year  for e in evs if e.last_used_year),  None)
-            date_parts = [p for p in [
-                f"{duration}m" if duration else None,
-                str(last_year) if last_year else None,
-            ] if p]
-            role_line = f"**{role or 'Role'}**" + (f" | {', '.join(date_parts)}" if date_parts else "")
+            wh = _wh_lookup.get(company.lower(), {})
+            role = next((e.role_title for e in evs if e.role_title), None) or wh.get("role_title")
+            # Prefer human-readable start_date/end_date; fall back to duration_months/last_used_year
+            if wh.get("start_date"):
+                end_str  = wh.get("end_date") or "Present"
+                date_str = f"{wh['start_date']} – {end_str}"
+            else:
+                duration  = next((e.duration_months for e in evs if e.duration_months), None) or wh.get("duration_months")
+                last_year = next((e.last_used_year  for e in evs if e.last_used_year),  None) or wh.get("last_used_year")
+                parts     = [p for p in [f"{duration}m" if duration else None, str(last_year) if last_year else None] if p]
+                date_str  = ", ".join(parts)
+            role_line = f"**{role or 'Role'}**" + (f" | {date_str}" if date_str else "")
             _synth_lines.append(role_line)
             _synth_lines.append(f"*{company}*")
             for ev in evs:
