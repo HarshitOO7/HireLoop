@@ -24,6 +24,7 @@ class User(Base):
     daily_app_limit      = Column(Integer, default=5)
     onboarded            = Column(Boolean, default=False)
     base_resume_markdown = Column(Text)   # raw text extracted from uploaded resume(s)
+    resume_facts         = Column(JSON, nullable=True)  # structured facts: education, work dates, projects, certs
     created_at           = Column(DateTime, default=datetime.utcnow)
 
     skill_nodes     = relationship("SkillNode", back_populates="user", cascade="all, delete")

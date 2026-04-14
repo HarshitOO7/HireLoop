@@ -117,7 +117,7 @@ def _extract_docx(data: bytes) -> str:
 
 # ── DB helpers ──────────────────────────────────────────────────────────────
 
-async def _save_onboarding_to_db(telegram_id: str, name: str, confirmed_skills: list, filters: dict, notify_freq: str, min_fit_score: int, base_resume_markdown: str = ""):
+async def _save_onboarding_to_db(telegram_id: str, name: str, confirmed_skills: list, filters: dict, notify_freq: str, min_fit_score: int, base_resume_markdown: str = "", resume_facts: dict | None = None):
     async with AsyncSessionLocal() as session:
         async with session.begin():
             from sqlalchemy import select
@@ -139,6 +139,8 @@ async def _save_onboarding_to_db(telegram_id: str, name: str, confirmed_skills: 
             user.onboarded = True
             if base_resume_markdown:
                 user.base_resume_markdown = base_resume_markdown
+            if resume_facts:
+                user.resume_facts = resume_facts
 
             # Wipe old skill nodes for this user (re-onboarding)
             old_nodes = await session.execute(
@@ -366,26 +368,35 @@ async def done_uploading(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     logger.info("[done_uploading] starting resume analysis — %d file(s)", n)
 
-    async def _parse_one(i: int, text: str) -> tuple[list, list]:
+    async def _parse_one(i: int, text: str) -> tuple[list, list, dict]:
         logger.info("[done_uploading] parsing resume %d/%d — %d chars", i, n, len(text))
         t_file = time.monotonic()
         try:
             parsed     = await ai.parse_resume(text)
             raw_skills = parsed.get("skills", [])
             work_hist  = parsed.get("work_history", [])
+            facts      = parsed.get("facts", {})
             logger.info("[done_uploading] resume %d done in %.2fs — %d skills  %d work entries",
                         i, time.monotonic() - t_file, len(raw_skills), len(work_hist))
-            return raw_skills, work_hist
+            return raw_skills, work_hist, facts
         except Exception as e:
             logger.error("[done_uploading] resume %d parse error (%.2fs): %s", i, time.monotonic() - t_file, e)
-            return [], []
+            return [], [], {}
 
-    results   = await asyncio.gather(*[_parse_one(i, t) for i, t in enumerate(resume_texts, 1)])
-    all_skills = [s for batch, _wh in results for s in batch]
+    results    = await asyncio.gather(*[_parse_one(i, t) for i, t in enumerate(resume_texts, 1)])
+    all_skills = [s for batch, _wh, _f in results for s in batch]
+
+    # Merge facts from all uploaded resumes (last upload wins per section)
+    merged_facts: dict = {}
+    for _, _, facts in results:
+        for key, val in (facts or {}).items():
+            if val:
+                merged_facts[key] = val
+    context.user_data["resume_facts"] = merged_facts
 
     # Merge work histories (de-dupe by company+role, keep longest duration)
     wh_map: dict[str, dict] = {}
-    for _, wh in results:
+    for _, wh, _ in results:
         for entry in wh:
             key = f"{entry.get('company', '')}|{entry.get('role', '')}"
             if key not in wh_map or (entry.get("duration_months") or 0) > (wh_map[key].get("duration_months") or 0):
@@ -804,6 +815,7 @@ async def set_fit_score(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
             notify_freq=context.user_data.get("notify_freq", "daily"),
             min_fit_score=score,
             base_resume_markdown=context.user_data.get("base_resume_markdown", ""),
+            resume_facts=context.user_data.get("resume_facts"),
         )
     except Exception as e:
         logger.error(f"DB save failed during onboarding: {e}")

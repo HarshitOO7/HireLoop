@@ -68,13 +68,7 @@ from resume.docx_export import render_docx
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 HARSHIT_USER_ID = "1e1cdd48-7bcb-4589-a949-a43e920587e5"
-
-# Pre-selected jobs with good fit scores — all belong to Harshit
-DEFAULT_JOBS = [
-    ("a78d5fb2-9622-429b-8ac8-28aac790e539", "Associate SWE New Grad", "Capital One", 82.0),
-    ("6b27e199-408b-47b1-82d3-f1552eb3e19b", "Senior Software Engineer", "ExaCare AI",  78.0),
-    ("bcb19409-3588-4525-b79d-d774a06b37fd", "Software Engineer",        "Relay",       72.0),
-]
+TOP_N_JOBS = 10   # how many top-scored jobs to show in the menu
 
 AUTO_MODE = "--all" in sys.argv
 
@@ -136,29 +130,31 @@ async def _print_profile(session):
 # ── Job menu ──────────────────────────────────────────────────────────────────
 
 async def _pick_jobs(session) -> list[tuple]:
-    """Show job menu and return selected (job_id, title, company, fit_score) tuples."""
+    """Show job menu pulled live from DB, return selected (job_id, title, company, fit_score) tuples."""
     from sqlalchemy import select
     from db.models import Job
 
-    # Load live data for the pre-selected jobs
-    jobs = []
-    for job_id, _, _, _ in DEFAULT_JOBS:
-        row = (await session.execute(select(Job).where(Job.id == job_id))).scalar_one_or_none()
-        if row:
-            jobs.append((row.id, row.title, row.company, row.fit_score or 0.0))
+    rows = (await session.execute(
+        select(Job)
+        .where(Job.user_id == HARSHIT_USER_ID, Job.fit_score.isnot(None))
+        .order_by(Job.fit_score.desc())
+        .limit(TOP_N_JOBS)
+    )).scalars().all()
 
-    _sep("Available Jobs")
+    jobs = [(r.id, r.title or "?", r.company or "?", r.fit_score or 0.0) for r in rows]
+
+    _sep("Available Jobs (top by fit score)")
     for i, (jid, title, company, score) in enumerate(jobs, 1):
-        print(f"  [{i}] {title} @ {company}  —  fit: {score:.0f}%")
-    print(f"  [A] Run all {len(jobs)}")
-    print(f"  [Q] Quit")
+        print(f"  [{i:>2}] {title[:45]:<45}  {company[:20]:<20}  fit: {score:.0f}%")
+    print(f"  [ A] Run all {len(jobs)}")
+    print(f"  [ Q] Quit")
 
     if AUTO_MODE:
         print("\n  (--all flag: running all jobs)")
         return jobs
 
     while True:
-        choice = input("\n  Pick job(s) [1/2/3/A/Q]: ").strip().lower()
+        choice = input(f"\n  Pick job [1-{len(jobs)}/A/Q]: ").strip().lower()
         if choice == "q":
             return []
         if choice == "a":

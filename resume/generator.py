@@ -208,6 +208,7 @@ async def generate_resume(
         work_history          = filters.get("work_history", [])
         target_role           = filters.get("role", "")
         special_instructions  = filters.get("resume_instructions", "")
+        resume_facts          = user.resume_facts or {}
 
         # ── Verified skills only (hard rule) ──────────────────────────────────
         node_result = await session.execute(
@@ -317,6 +318,7 @@ async def generate_resume(
                 verified_skills=verified_skills,
                 user_evidence="\n".join(evidence_lines) if evidence_lines else "",
                 special_instructions=special_instructions,
+                resume_facts=resume_facts,
             )
         except Exception as e:
             logger.error("[generator] tailor_resume failed: %s", e)

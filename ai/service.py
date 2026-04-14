@@ -56,6 +56,13 @@ SCORING RULES:
 - Never return fit_score > 85 unless all required skills are matched
 - gap_summary must be honest — if fit_score < 60, say so plainly
 
+EXPERIENCE / SENIORITY PENALTY:
+- If the job requires more years of experience than the candidate has, apply a significant penalty
+  - Candidate is 1–2 years short: subtract 10–15 points
+  - Candidate is 3+ years short: subtract 20–30 points; set action to "skip" if fit_score < 60
+- If the job seniority level (senior / lead / staff) clearly exceeds what the candidate can claim based
+  on their years, reflect that gap honestly in gap_summary and lower the score accordingly
+
 Return ONLY valid JSON. No preamble, no markdown fences, no explanation."""
 
 _FIT_PROMPT = """Analyze the fit between this job and candidate profile.
@@ -67,6 +74,10 @@ _FIT_PROMPT = """Analyze the fit between this job and candidate profile.
 <candidate_skills>
 {skill_graph_json}
 </candidate_skills>
+
+<candidate_experience>
+{candidate_years}
+</candidate_experience>
 
 <resume_variants>
 {variant_tags}
@@ -146,8 +157,16 @@ Return this exact JSON structure:
       "last_used_year": <integer|null>
     }}
   ],
-  "variant_tags": [<string>]
+  "variant_tags": [<string>],
+  "facts": {{
+    "education": [{{"credential": <string>, "institution": <string>, "graduation_year": <int|null>, "gpa": <string|null>}}],
+    "work":      [{{"company": <string>, "title": <string>, "start": <string|null>, "end": <string|null>}}],
+    "projects":  [{{"name": <string>, "dates": <string|null>}}],
+    "certifications": [{{"name": <string>, "date": <string|null>}}]
+  }}
 }}
+
+For "facts": copy all values verbatim from the resume — no rewording, no date reformatting.
 
 Return ONLY the JSON object. No text before or after the closing brace."""
 
@@ -203,10 +222,28 @@ OUTPUT FORMAT (follow this section structure exactly):
 *Institution*
 ## PROJECTS (tech roles only)
 **Name** | Year
-- bullet"""
+- bullet
+
+WRITING STYLE — NON-NEGOTIABLE:
+- No em dashes (—). Use a comma, colon, or rewrite the sentence.
+- Never use: spearheaded, leveraged, utilized, orchestrated, championed, pioneered,
+  fostered, cultivated, synergize, robust, holistic, pivotal, transformative,
+  delve, cutting-edge, game-changing, results-driven, dynamic
+- No vague intensifiers ("significantly", "greatly") — use a real number or cut the word
+- No passive fluff: "was responsible for" → use built / ran / owned / shipped / cut
+- Vary bullet openers — never start 3+ consecutive bullets with the same verb
+- Short, punchy, plain language. Write like a person, not a press release.
+
+GROUND TRUTH FACTS:
+The <facts> block contains values extracted directly from the user's own uploaded resume.
+- Education credentials, institutions, graduation years, GPA: copy character-for-character
+- Work company names and date ranges: use exactly as given — never reformat or guess
+- Project names/dates and certifications: copy exactly
+Deviating from any value in <facts> is an error."""
 
 _TAILOR_PROMPT = """Tailor this resume for the job below.
 
+{facts_block}
 <resume variant="{variant_tag}">
 {base_resume_text}
 </resume>
@@ -232,7 +269,16 @@ Cover letter required: {requires_cl}
 Output the full tailored resume in Markdown starting from the first ## section.
 {cover_letter_instruction}"""
 
-_COVER_LETTER_SYSTEM = "You are an expert at writing compelling, honest cover letters."
+_COVER_LETTER_SYSTEM = """You are an expert at writing compelling, honest cover letters.
+
+WRITING STYLE — NON-NEGOTIABLE:
+- No em dashes (—). Use a comma, colon, or rewrite the sentence.
+- Never use: spearheaded, leveraged, utilized, orchestrated, championed, pioneered,
+  fostered, cultivated, synergize, robust, holistic, pivotal, transformative,
+  delve, cutting-edge, game-changing, results-driven, dynamic
+- No vague intensifiers ("significantly", "greatly") — use a real number or cut the word
+- No passive fluff: "was responsible for" → use built / ran / owned / shipped / cut
+- Short, punchy, plain language. Write like a person, not a press release."""
 
 _COVER_LETTER_PROMPT = """Write a cover letter for this job application.
 
@@ -383,7 +429,17 @@ NEW SECTIONS:
 CANNOT APPLY:
 - Only output <section name="CANNOT_APPLY">reason</section> if the request is genuinely impossible
   (e.g. information does not exist anywhere and the user did not provide it)
-- Never use CANNOT_APPLY just because information is missing from one section — check all sections and evidence"""
+- Never use CANNOT_APPLY just because information is missing from one section — check all sections and evidence
+
+WRITING STYLE — NON-NEGOTIABLE:
+- No em dashes (—). Use a comma, colon, or rewrite the sentence.
+- Never use: spearheaded, leveraged, utilized, orchestrated, championed, pioneered,
+  fostered, cultivated, synergize, robust, holistic, pivotal, transformative,
+  delve, cutting-edge, game-changing, results-driven, dynamic
+- No vague intensifiers ("significantly", "greatly") — use a real number or cut the word
+- No passive fluff: "was responsible for" → use built / ran / owned / shipped / cut
+- Vary bullet openers — never start 3+ consecutive bullets with the same verb
+- Short, punchy, plain language. Write like a person, not a press release."""
 
 _PATCH_PROMPT = """<current_resume>
 {current_resume}
@@ -394,6 +450,45 @@ _PATCH_PROMPT = """<current_resume>
 </edit_request>
 
 Apply the edit. Output <section name="..."> tags for changed sections, and a <reorder> tag if section order changed. Both may appear together."""
+
+
+# ── Facts block builder ───────────────────────────────────────────────────────
+
+def _build_facts_block(facts: dict | None) -> str:
+    """Build a <facts> block from structured resume facts for injection into tailor_resume prompt."""
+    if not facts:
+        return ""
+    lines = ["<facts — copy these exactly, character-for-character>"]
+    edu = facts.get("education") or []
+    if edu:
+        lines.append("EDUCATION:")
+        for e in edu:
+            cred = e.get("credential", "")
+            inst = e.get("institution", "")
+            year = e.get("graduation_year", "")
+            gpa  = e.get("gpa", "")
+            parts = [p for p in [cred, inst, str(year) if year else "", f"GPA: {gpa}" if gpa else ""] if p]
+            lines.append(f"  \u2022 {' | '.join(parts)}")
+    work = facts.get("work") or []
+    if work:
+        lines.append("WORK DATES (use exactly):")
+        for w in work:
+            start = w.get("start", "")
+            end   = w.get("end", "")
+            date  = f"{start} \u2013 {end}" if start and end else start or end or ""
+            lines.append(f"  \u2022 {w.get('company', '')} \u2014 {w.get('title', '')}: {date}")
+    projects = facts.get("projects") or []
+    if projects:
+        lines.append("PROJECTS:")
+        for p in projects:
+            lines.append(f"  \u2022 {p.get('name', '')}: {p.get('dates', '')}")
+    certs = facts.get("certifications") or []
+    if certs:
+        lines.append("CERTIFICATIONS:")
+        for c in certs:
+            lines.append(f"  \u2022 {c.get('name', '')}: {c.get('date', '')}")
+    lines.append("</facts>")
+    return "\n".join(lines) + "\n"
 
 
 # ── Service ───────────────────────────────────────────────────────────────────
@@ -441,7 +536,7 @@ class HireLoopAI:
         logger.info("[parse_resume] prompt built — %d chars — sending to AI...", len(prompt))
 
         t_ai = time.monotonic()
-        raw = await self._fast.complete_json(prompt, system=_PARSE_RESUME_SYSTEM, max_tokens=1000)
+        raw = await self._fast.complete_json(prompt, system=_PARSE_RESUME_SYSTEM, max_tokens=3000)
         logger.info("[parse_resume] AI responded in %.2fs — raw response length: %d chars", time.monotonic() - t_ai, len(raw))
 
         result = _parse_json(raw)
@@ -488,6 +583,7 @@ class HireLoopAI:
         verified_skills: list[dict],
         user_evidence: str = "",
         special_instructions: str = "",
+        resume_facts: dict | None = None,
     ) -> str:
         variant = fit.get("best_resume_variant", "general")
         requires_cl = bool(job.get("requires_cover_letter", False))
@@ -505,6 +601,7 @@ class HireLoopAI:
         _instructions = (special_instructions or "")[:600]
 
         prompt = _TAILOR_PROMPT.format(
+            facts_block=_build_facts_block(resume_facts),
             variant_tag=variant,
             base_resume_text=base_resume,
             jd_text=_slim_job(job, ("title", "company", "required_skills", "preferred_skills",
