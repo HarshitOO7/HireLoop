@@ -191,11 +191,21 @@ HARD RULES:
 - GitHub link: only include if the candidate's resume already contains one AND the target role is technical (software/engineering/data/IT). Omit entirely for non-technical roles.
 - Links: write bare URLs (e.g. linkedin.com/in/username) — the renderer handles making them clickable
 
-EXPERIENCE FILTERING:
-- Omit work experience entries older than 10 years unless they directly use a required skill for the target role
-- Keep at most 4 Work Experience entries; if more exist, drop the oldest/least relevant first
-- For retained older roles, condense to 1–2 bullets — never omit an entry that is within 10 years
-- Education, certifications, licences, and volunteer work are exempt from the 10-year rule — always include them
+EXPERIENCE DEPTH — RELEVANCE TIERS:
+Use the <fit> block (matched_skills) to assign each work entry to a tier based on how many
+of those matched skills the candidate used at that role (infer from base resume + evidence):
+
+  PRIMARY   — 2+ matched_skills used there             → 4–6 bullets
+  SECONDARY — 1 matched skill OR preferred skills only  → 2–3 bullets
+  SUPPORTING— within 10 years, no matched skills        → 1–2 bullets (headline achievements only)
+  DROP      — older than 10 years with no matched skill, or clearly unrelated role
+
+Rules:
+- Never drop a PRIMARY or SECONDARY role to fit the page; condense bullets instead
+- If you have more than 4 entries after applying tiers, drop SUPPORTING entries first
+- Education, certifications, licences, and volunteer work are exempt — always include them
+- For ADDITIONAL WORK HISTORY FROM SKILL GRAPH entries: apply the same tier logic (1–4 bullets)
+- If you cannot classify a role because the base resume lacks context, treat it as SUPPORTING
 
 ANTI-HALLUCINATION RULES:
 - Every bullet must be traceable to either the base resume or the evidence notes
@@ -204,9 +214,23 @@ ANTI-HALLUCINATION RULES:
 - If you cannot write a strong bullet without inventing details, write a weaker honest bullet
 - "Led", "Architected", "Designed" — only use these if the source material uses them or clearly implies them
 
+BULLET QUALITY — NON-NEGOTIABLE:
+- Lead with impact or outcome, then the action: "Cut deploy time 60% by containerizing services"
+  not "Worked on containerizing services which improved deploy time"
+- Use concrete specificity where the source material has it: feature names, scale (users,
+  requests/sec, rows, team size), timelines, business context — never invent, but use every real detail you have
+- Every bullet = one clear action + one clear result (even if qualitative: "eliminating manual retries")
+- Avoid scope-only bullets that say what you touched but not what happened:
+    BAD:  "Contributed to the authentication module redesign"
+    GOOD: "Rebuilt JWT refresh flow, removing a session expiry bug affecting 30% of mobile logins"
+- Three or more bullets at one role: vary the angle — mix technical depth, ownership/scale, and
+  delivery/outcome so each bullet teaches the recruiter something new
+- Never pad with framing the recruiter already knows:
+    BAD:  "As a full-stack developer, wrote React components for the dashboard"
+    GOOD: "Built the analytics dashboard in React, cutting report load time from 8s to under 1s"
+
 For ADDITIONAL WORK HISTORY FROM SKILL GRAPH entries:
-- You have limited info — write 1-2 bullets max per company, strictly from what is provided
-- Do not expand or embellish the user's description
+- Apply the relevance tier above; do not expand or embellish beyond what is provided
 - If duration is present, include it as the date range
 
 OUTPUT FORMAT (follow this section structure exactly):
@@ -251,6 +275,10 @@ _TAILOR_PROMPT = """Tailor this resume for the job below.
 <job>
 {jd_text}
 </job>
+
+<fit>
+{fit_json}
+</fit>
 
 <verified_skills>
 {verified_skills_json}
@@ -613,6 +641,7 @@ class HireLoopAI:
             base_resume_text=base_resume,
             jd_text=_slim_job(job, ("title", "company", "required_skills", "preferred_skills",
                                     "seniority", "years_experience", "cover_letter_keywords")),
+            fit_json=_jc({"matched_skills": fit.get("matched_skills", [])}),
             verified_skills_json=_jc(verified_skills),
             user_evidence_text=_evidence or "None provided.",
             special_instructions_text=_instructions or "None.",
