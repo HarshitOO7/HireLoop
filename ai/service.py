@@ -183,7 +183,7 @@ HARD RULES:
 - Only include skills where status starts with "verified_" in the skill graph
 - Never invent accomplishments — use STAR format for all bullets
 - Mirror JD keywords for ATS optimization (do not keyword-stuff)
-- Max 1 page under 5yr experience, 2 pages for 5yr+ — but NEVER drop a work experience entry to fit; condense bullets instead
+- Max 1 page under 5yr experience, 2 pages for 5yr+ — but NEVER drop a CORE or RELEVANT work experience entry to fit the page; condense bullets instead
 - If "ADDITIONAL WORK HISTORY FROM SKILL GRAPH" is present in the context, include every company listed there as a WORK EXPERIENCE entry — the candidate verified this experience via the skill verification flow, it must appear even if absent from the uploaded resume
 - If cover letter required: append after ---COVER LETTER--- separator
 - DO NOT output the candidate's name or contact line — start your output directly from the first ## section (e.g. ## SUMMARY)
@@ -191,21 +191,42 @@ HARD RULES:
 - GitHub link: only include if the candidate's resume already contains one AND the target role is technical (software/engineering/data/IT). Omit entirely for non-technical roles.
 - Links: write bare URLs (e.g. linkedin.com/in/username) — the renderer handles making them clickable
 
-EXPERIENCE DEPTH — RELEVANCE TIERS:
-Use the <fit> block (matched_skills) to assign each work entry to a tier based on how many
-of those matched skills the candidate used at that role (infer from base resume + evidence):
+WORK EXPERIENCE — CURATION (read before writing a single bullet):
+A recruiter spends 6–10 seconds on first scan. Roles with no connection to the JD make strong
+candidates look unfocused. Cut ruthlessly — a tighter resume always outperforms a padded one.
 
-  PRIMARY   — 2+ matched_skills used there             → 4–6 bullets
-  SECONDARY — 1 matched skill OR preferred skills only  → 2–3 bullets
-  SUPPORTING— within 10 years, no matched skills        → 1–2 bullets (headline achievements only)
-  DROP      — older than 10 years with no matched skill, or clearly unrelated role
+STEP 1 — CLASSIFY each entry using <fit> matched_skills + the job description:
 
-Rules:
-- Never drop a PRIMARY or SECONDARY role to fit the page; condense bullets instead
-- If you have more than 4 entries after applying tiers, drop SUPPORTING entries first
-- Education, certifications, licences, and volunteer work are exempt — always include them
-- For ADDITIONAL WORK HISTORY FROM SKILL GRAPH entries: apply the same tier logic (1–4 bullets)
-- If you cannot classify a role because the base resume lacks context, treat it as SUPPORTING
+  CORE     — 2+ matched_skills clearly used at this role  → 4–6 bullets, full technical depth
+  RELEVANT — 1 matched skill OR adjacent preferred skills  → 2–3 bullets, key wins only
+  MARGINAL — zero matched skills, passes KEEP TEST below   → 1–2 bullets, headline only
+  CUT      — everything else (see CUT LIST below)
+
+KEEP TEST for MARGINAL (must satisfy at least one to survive):
+  ✓ Directly taught or mentored in a skill from verified_skills (e.g. CS tutoring counts)
+  ✓ Managed people AND the JD explicitly values leadership or people management
+  ✓ Operated at measurable scale that maps to something the JD values
+  "I had a job and showed up" does not pass the KEEP TEST.
+
+CUT LIST — these role types never survive on a technical JD (no exceptions):
+  · warehouse / fulfillment center / logistics worker
+  · retail associate / cashier / stock room
+  · food service / hospitality / barista
+  · admin / receptionist / office assistant / data entry clerk
+  · non-technical test/exam supervisor or invigilator
+  · manual labor, security guard, delivery driver
+  Keeping these on a tech resume signals the candidate couldn't find tech work. Cut them.
+
+STEP 2 — APPLY hard limits after classification:
+  - Max 4 work experience entries in the final output
+  - If more than 4 survive, cut MARGINAL first, then oldest RELEVANT
+  - Never cut a CORE or RELEVANT entry to fit the page — condense bullets instead
+  - Roles older than 10 years with no matched skill: CUT (unless classified CORE/RELEVANT)
+  - Education, certifications, licences, and volunteer work are exempt — always include them
+
+STEP 3 — AFTER the full resume markdown, report every CUT role:
+  <omitted>Role Title @ Company — reason in 5 words or less</omitted>
+  One tag per cut role. If nothing was cut, do not output any <omitted> tags.
 
 ANTI-HALLUCINATION RULES:
 - Every bullet must be traceable to either the base resume or the evidence notes

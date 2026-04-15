@@ -101,6 +101,18 @@ def extract_save_hint(patch_output: str) -> str | None:
     return m.group(1).strip() if m else None
 
 
+def extract_omitted(output: str) -> list[str]:
+    """Return list of cut role descriptions from <omitted> tags, if any."""
+    return [m.strip() for m in re.findall(
+        r'<omitted>(.*?)</omitted>', output, re.DOTALL | re.IGNORECASE
+    )]
+
+
+def _strip_omitted_tags(text: str) -> str:
+    """Remove all <omitted> tags from resume markdown before saving."""
+    return re.sub(r'\s*<omitted>.*?</omitted>', '', text, flags=re.DOTALL | re.IGNORECASE).strip()
+
+
 def _parse_work_history_from_md(work_exp_md: str) -> list[dict]:
     """Parse WORK EXPERIENCE markdown into structured entries.
 
@@ -271,10 +283,10 @@ async def generate_resume(
     job_id: str,
     user_id: str,
     ai,                   # HireLoopAI instance
-) -> "Application | None":
+) -> "tuple[Application, list[str]] | tuple[None, list]":
     """
     Generate a tailored resume for job_id and persist it in the Application row.
-    Returns the Application, or None on failure.
+    Returns (Application, omitted_roles) on success, or (None, []) on failure.
     """
     from sqlalchemy import select
     from db.models import Application, Job, SkillEvidence, SkillNode, User
@@ -288,18 +300,18 @@ async def generate_resume(
         job = job_result.scalar_one_or_none()
         if not job:
             logger.error("[generator] job %s not found", job_id)
-            return None
+            return None, []
 
         # ── Load user ─────────────────────────────────────────────────────────
         user_result = await session.execute(select(User).where(User.id == user_id))
         user = user_result.scalar_one_or_none()
         if not user:
             logger.error("[generator] user %s not found", user_id)
-            return None
+            return None, []
 
         if not user.base_resume_markdown:
             logger.error("[generator] user %s has no base resume — upload one first", user_id)
-            return None
+            return None, []
 
         filters               = user.filters or {}
         work_history          = filters.get("work_history", [])
@@ -318,7 +330,7 @@ async def generate_resume(
 
         if not skill_nodes:
             logger.warning("[generator] user %s has no verified skills", user_id)
-            return None
+            return None, []
 
         node_by_id = {n.id: n for n in skill_nodes}
 
@@ -431,7 +443,13 @@ async def generate_resume(
             )
         except Exception as e:
             logger.error("[generator] tailor_resume failed: %s", e)
-            return None
+            return None, []
+
+        # ── Extract and strip <omitted> tags before any further processing ───────
+        omitted_roles = extract_omitted(raw_output)
+        if omitted_roles:
+            logger.info("[generator] omitted roles: %s", omitted_roles)
+        raw_output = _strip_omitted_tags(raw_output)
 
         # ── Split: resume / cover letter / changes ─────────────────────────────
         resume_md       = raw_output
@@ -485,7 +503,7 @@ async def generate_resume(
             if job_row:
                 job_row.status = "approved"
 
-    return app
+    return app, omitted_roles
 
 
 async def generate_cover_letter(

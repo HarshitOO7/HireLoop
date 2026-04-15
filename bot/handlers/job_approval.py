@@ -165,7 +165,7 @@ async def start_resume_generation(
     )
 
     try:
-        app = await generate_resume(job_id, user_id, ai)
+        app, omitted_roles = await generate_resume(job_id, user_id, ai)
     except Exception as e:
         logger.error("[job_approval] generate_resume raised: %s", e, exc_info=True)
         await thinking.edit_text(
@@ -190,9 +190,13 @@ async def start_resume_generation(
         "Want to add a cover letter? (not required, but can help)"
     )
 
+    omitted_note = ""
+    if omitted_roles:
+        omitted_note = "\n\n_Not included (not relevant to this role): " + ", ".join(omitted_roles) + "_"
+
     await thinking.edit_text(
         f"✅ Resume ready for *{_md(title)}*{f' @ {_md(company)}' if company else ''}!\n\n"
-        f"{cl_prompt}",
+        f"{cl_prompt}{omitted_note}",
         parse_mode="Markdown",
         reply_markup=cover_letter_ask_keyboard(job_id),
     )

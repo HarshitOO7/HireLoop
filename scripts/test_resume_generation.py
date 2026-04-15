@@ -63,7 +63,7 @@ load_dotenv()
 
 from ai.factory import AIFactory
 from ai.service import HireLoopAI
-from resume.generator import generate_resume, apply_patch, extract_save_hint, save_globally
+from resume.generator import generate_resume, apply_patch, extract_save_hint, extract_omitted, save_globally
 from resume.docx_export import render_docx
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -285,7 +285,7 @@ async def _run_job(job_id: str, title: str, company: str, fit: float, ai: HireLo
     print(f"  [generate] Calling tailor_resume() via {ai._quality.provider_name} (quality)...")
 
     t0 = time.monotonic()
-    app = await generate_resume(job_id, user_id, ai)
+    app, omitted_roles = await generate_resume(job_id, user_id, ai)
     elapsed = time.monotonic() - t0
 
     if not app or not app.resume_markdown:
@@ -299,6 +299,8 @@ async def _run_job(job_id: str, title: str, company: str, fit: float, ai: HireLo
     print(f"  [generate] ✓ Done in {elapsed:.1f}s — resume: {len(resume_md)} chars | "
           f"cover letter: {'yes (' + str(len(cl_md)) + ' chars)' if cl_md else 'no'}")
     print(f"  [generate] Sections     : {', '.join(sections)}")
+    for role in omitted_roles:
+        print(f"  [omitted]  {role}")
 
     # ── Interactive loop ──────────────────────────────────────────────────────
     while True:
