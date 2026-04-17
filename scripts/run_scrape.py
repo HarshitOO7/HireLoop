@@ -1,7 +1,7 @@
 """
 Standalone scrape script — full pipeline without the bot.
 
-Scrapes jobs for Harshit, applies all filters (including years_of_exp),
+Scrapes jobs for the first onboarded user, applies all filters (including years_of_exp),
 runs parse+fit AI, and saves qualifying jobs to DB.
 
 Usage:
@@ -32,9 +32,6 @@ for noisy in ("urllib3", "httpx", "httpcore"):
 
 logger = logging.getLogger("run_scrape")
 
-HARSHIT_USER_ID = "1e1cdd48-7bcb-4589-a949-a43e920587e5"
-
-
 async def main():
     import argparse
     parser = argparse.ArgumentParser()
@@ -57,20 +54,26 @@ async def main():
     logger.info("Quality : %s", quality.provider_name)
 
     async with AsyncSessionLocal() as s:
-        user = (await s.execute(select(User).where(User.id == HARSHIT_USER_ID))).scalar_one()
+        result = await s.execute(select(User).where(User.onboarded == True))
+        users = result.scalars().all()
+        if not users:
+            logger.error("No onboarded users found in DB.")
+            return
+        user = users[0]
+        logger.info("User    : %s (%s)", user.name, user.id)
         f = user.filters or {}
         logger.info("User    : %s  min_fit=%d  years_of_exp=%r",
                     user.name, user.min_fit_score, f.get("years_of_exp"))
 
         # Already-seen hashes and keys to avoid re-inserting
         existing = (await s.execute(select(Job.url_hash, Job.title, Job.company)
-                                    .where(Job.user_id == HARSHIT_USER_ID))).all()
+                                    .where(Job.user_id == user.id))).all()
         seen_hashes = {row.url_hash for row in existing if row.url_hash}
         seen_keys   = {(row.title or "", row.company or "") for row in existing}
 
         # Build user profile for fit scoring
         node_rows = (await s.execute(
-            select(SkillNode).where(SkillNode.user_id == HARSHIT_USER_ID,
+            select(SkillNode).where(SkillNode.user_id == user.id,
                                     SkillNode.status.like("verified_%"))
         )).scalars().all()
         ev_rows = (await s.execute(

@@ -73,6 +73,11 @@ Scrape jobs  →  Score fit  →  Verify skills  →  Generate resume  →  You 
 | Standing resume instructions (/instructions — apply to every resume) | ✅ Done |
 | Experience filtering (max 4 entries, drop >10 yr old unless required) | ✅ Done |
 | Input length caps (skill evidence 400 chars, instructions/edits 600 chars) | ✅ Done |
+| Work experience curation (CORE / RELEVANT / MARGINAL / CUT tiers) | ✅ Done |
+| Matched skills injected into resume AI (JD-aware relevance scoring) | ✅ Done |
+| Omitted role transparency (bot surfaces every dropped role to user) | ✅ Done |
+| VPS hosting — deploy bot + DB to run continuously | 🔜 Next |
+| Self-hosted LLM — Ollama on VPS for zero-cost quality inference | 🔜 Next |
 | Recruiter finder | 🔜 Phase 2 |
 | Embedding-based fit scoring (RAG / semantic similarity) | 🔜 Phase 3 |
 | Auto-apply (Playwright) | 🔜 Phase 3 |
@@ -573,7 +578,7 @@ hireloop/
 │
 └── scripts/
     ├── test_provider.py           # AI provider smoke test (fast + quality)
-    └── test_resume_generation.py  # Resume gen E2E: real DB copy → generate → edit → DOCX
+    └── run_scrape.py              # Standalone scrape — full pipeline without the bot
 ```
 
 ---
@@ -681,6 +686,13 @@ applications
 - [x] Standing resume instructions (/instructions → stored in user.filters)
 - [x] Experience filtering (max 4 work entries, drop >10 yr unless required skill)
 - [x] Input length caps on all AI-facing user text (two-layer: handler + service.py)
+- [x] Work experience curation — CORE/RELEVANT/MARGINAL/CUT tiers, KEEP TEST, CUT LIST
+- [x] Matched skills from fit analysis injected into resume AI prompt
+- [x] Omitted role accountability — AI reports every dropped role, bot surfaces it to user
+
+### Next Steps
+- [ ] VPS hosting — deploy bot + DB to run continuously (to be planned)
+- [ ] Self-hosted LLM — Ollama on VPS for zero-cost quality inference (to be planned)
 
 ### Phase 2 — Multi-user + Intelligence
 - [ ] Recruiter finder (3-tier: JD parse → LinkedIn → web search)
@@ -688,7 +700,6 @@ applications
 - [ ] Outcome tracking (interview / rejected / ghosted / offer)
 - [ ] Salary intel before fit scoring
 - [ ] Postgres migration
-- [ ] VPS deployment
 
 ### Phase 3 — Automation
 - [ ] Auto-apply via Playwright (Workday / Greenhouse / Lever)
@@ -707,8 +718,8 @@ applications
 # AI provider smoke test — verifies fast + quality providers respond correctly
 python scripts/test_provider.py
 
-# Resume generation end-to-end — uses real DB copy, interactive approve/edit loop
-python scripts/test_resume_generation.py
+# Standalone scrape — full pipeline without the bot (auto-detects first onboarded user)
+python scripts/run_scrape.py
 
 # Syntax check all modules
 python -m py_compile bot/main.py bot/onboarding.py \
@@ -716,7 +727,7 @@ python -m py_compile bot/main.py bot/onboarding.py \
   ai/service.py ai/factory.py db/models.py
 ```
 
-`test_resume_generation.py` copies `hireloop.db` → `hireloop_test.db` (prod untouched), generates a tailored resume with real user data, and gives you an interactive **[L] Looks good / [E] Edit / [S] Skip** loop with full logs showing section order, AI timing, and which sections each edit touched. DOCX files are saved to `resume/output/`.
+Resume generation is tested through the live bot — approve a job card, generate, edit, and download DOCX directly in Telegram.
 
 ---
 

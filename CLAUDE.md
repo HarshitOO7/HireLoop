@@ -73,7 +73,7 @@ hireloop/
 ├── tests/
 └── scripts/
     ├── test_provider.py           # AI provider smoke test
-    └── test_resume_generation.py  # Resume gen E2E: real DB copy → generate → edit → DOCX
+    └── run_scrape.py              # Standalone scrape — full pipeline without the bot
 ```
 
 ---
@@ -394,11 +394,16 @@ All features shipped and tested:
 - **Resume pipeline**: generator, section order (pure Python), DOCX export (python-docx), PDF export (reportlab)
 - **Edit loop**: patch_resume() + apply_patch() → AI-targeted section edits
 - **Quality controls**: input caps (two-layer), standing instructions, experience filtering (max 4 entries, drop >10yr)
+- **Resume curation**: CORE/RELEVANT/MARGINAL/CUT tiers, KEEP TEST, CUT LIST, matched_skills in AI prompt, omitted role reporting
 - **Application tracking**: /myapps history, outcome logging
 
-Test scripts:
-- `python scripts/test_provider.py`           — AI provider smoke test
-- `python scripts/test_resume_generation.py`  — resume gen E2E (real DB copy, interactive approve/edit loop)
+Next steps (to be planned):
+- VPS hosting — deploy bot + DB to run continuously
+- Self-hosted LLM — Ollama on VPS for zero-cost quality inference
+
+Scripts:
+- `python scripts/test_provider.py`  — AI provider smoke test
+- `python scripts/run_scrape.py`     — standalone scrape for any onboarded user
 
 ---
 
@@ -433,13 +438,17 @@ Test scripts:
 
 ---
 
+## Next Steps (immediate)
+- VPS hosting — deploy bot + DB to run continuously (to be planned)
+- Self-hosted LLM — Ollama on VPS for zero-cost quality inference (to be planned)
+
 ## Phase 2 (after 30 days of real usage)
 - Recruiter finder (3-tier: parse JD → LinkedIn search → web search)
 - Application rate limiter (daily cap + 30-day same-company cooldown)
 - Outcome tracking (interview? reject? offer?)
 - Salary intel step before fit analysis
 - Multi-user via Telegram Supergroup Topics
-- Hosted VPS + Postgres migration
+- Postgres migration
 
 ## Phase 3 (6–12 months)
 - Auto-apply: Playwright fills Workday/Greenhouse/Lever forms
@@ -467,12 +476,10 @@ blocks tls_client (JobSpy default) with 403.  Fix: monkey-patch in jobs/glassdoo
 replaces JobSpy's create_session with curl_cffi (Chrome124 impersonation) and tolerates
 partial GraphQL errors (SEO-only 503s are non-fatal).  Applied at import time in scraper.py.
 
-### Test scripts
+### Scripts
 ```bash
-python scripts/test_provider.py           # AI provider smoke test (fast + quality)
-python scripts/test_resume_generation.py  # Resume gen E2E — real DB copy, interactive
+python scripts/test_provider.py  # AI provider smoke test (fast + quality)
+python scripts/run_scrape.py     # Standalone scrape — auto-detects first onboarded user
 ```
 
-`test_resume_generation.py` copies hireloop.db → hireloop_test.db, runs generate_resume()
-with real user data, shows full logs (section order, AI timing, sections modified on edit),
-and provides an interactive [L]ooks good / [E]dit / [S]kip loop with DOCX output.
+Resume generation is tested through the live bot (approve job card → generate → edit → DOCX).
