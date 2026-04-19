@@ -41,10 +41,13 @@ hireloop/
 │       ├── ollama_provider.py     # Local free option
 │       └── __init__.py
 │
+├── alembic/
+│   ├── env.py
+│   └── versions/                  # Migration files
+│
 ├── db/
 │   ├── models.py                  # SQLAlchemy — skill graph schema
-│   ├── session.py
-│   └── migrations/                # Alembic
+│   └── session.py
 │
 ├── bot/
 │   ├── main.py
@@ -58,6 +61,7 @@ hireloop/
 │
 ├── jobs/
 │   ├── scraper.py                 # JobSpy wrapper
+│   ├── glassdoor_patch.py         # curl_cffi patch — Canadian IP geo-redirect + Cloudflare 403
 │   ├── parser.py                  # Jina Reader for pasted URLs
 │   ├── filters.py
 │   └── scheduler.py               # APScheduler — embedded in bot process
@@ -422,7 +426,7 @@ Scripts:
 11. Resume stored as Markdown TEXT in DB — render to .docx (python-docx) or PDF (reportlab) on-demand
 12. .docx is primary format (ATS-safe); PDF is on-request only — use python-docx NOT pypandoc (pypandoc converts MD tables → Word tables = ATS killer)
 13. Section order inferred from profile via section_order.py — zero tokens, pure Python decision tree
-12. Background scheduling via APScheduler AsyncIOScheduler — not n8n
+14. Background scheduling via APScheduler AsyncIOScheduler — not n8n
 
 ---
 

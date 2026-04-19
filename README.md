@@ -76,6 +76,8 @@ Scrape jobs  →  Score fit  →  Verify skills  →  Generate resume  →  You 
 | Work experience curation (CORE / RELEVANT / MARGINAL / CUT tiers) | ✅ Done |
 | Matched skills injected into resume AI (JD-aware relevance scoring) | ✅ Done |
 | Omitted role transparency (bot surfaces every dropped role to user) | ✅ Done |
+| Humanization rules — no em dashes, no AI buzzwords (global, all resumes) | ✅ Done |
+| Ground-truth facts injection — degree/dates/GPA locked via `<facts>` block | ✅ Done |
 | VPS hosting — deploy bot + DB to run continuously | 🔜 Next |
 | Self-hosted LLM — Ollama on VPS for zero-cost quality inference | 🔜 Next |
 | Recruiter finder | 🔜 Phase 2 |
@@ -546,10 +548,13 @@ hireloop/
 │       ├── groq_provider.py
 │       └── ollama_provider.py
 │
+├── alembic/
+│   ├── env.py
+│   └── versions/                  # Migration files
+│
 ├── db/
 │   ├── models.py                  # User · SkillNode · SkillEvidence · Job · Application
-│   ├── session.py                 # AsyncSessionLocal + engine
-│   └── migrations/                # Alembic
+│   └── session.py                 # AsyncSessionLocal + engine
 │
 ├── bot/
 │   ├── main.py                    # Entry point, handler registration
@@ -563,10 +568,11 @@ hireloop/
 │       └── resume_upload.py       # (Week 4) resume generation
 │
 ├── jobs/
-│   ├── scraper.py                 # (Week 3) JobSpy wrapper
-│   ├── parser.py                  # (Week 3) Jina Reader for pasted URLs
-│   ├── filters.py                 # (Week 3) salary / blacklist / dedup filters
-│   └── scheduler.py              # (Week 3) APScheduler AsyncIOScheduler
+│   ├── scraper.py                 # JobSpy wrapper
+│   ├── glassdoor_patch.py         # curl_cffi patch — fixes Canadian IP geo-redirect + Cloudflare 403
+│   ├── parser.py                  # Jina Reader for pasted URLs
+│   ├── filters.py                 # salary / blacklist / seniority / dedup filters
+│   └── scheduler.py               # APScheduler AsyncIOScheduler
 │
 ├── resume/
 │   ├── generator.py               # (Week 4) tailor_resume() → store Markdown in DB
@@ -628,6 +634,7 @@ AI_FAST_API_KEY=your_key
 users
   id (UUID PK) · telegram_id · name · filters (JSON) · notify_freq
   min_fit_score · daily_app_limit · onboarded · created_at
+  base_resume_markdown · resume_facts (JSON)
 
 skill_nodes
   id · user_id (FK) · skill_name · status · confidence
@@ -689,6 +696,8 @@ applications
 - [x] Work experience curation — CORE/RELEVANT/MARGINAL/CUT tiers, KEEP TEST, CUT LIST
 - [x] Matched skills from fit analysis injected into resume AI prompt
 - [x] Omitted role accountability — AI reports every dropped role, bot surfaces it to user
+- [x] Humanization — WRITING STYLE rules ban em dashes + AI buzzwords across all system prompts
+- [x] Ground-truth facts — `resume_facts` extracted at upload, injected as locked `<facts>` block into every `tailor_resume()` call to prevent hallucination of dates/degrees/GPA
 
 ### Next Steps
 - [ ] VPS hosting — deploy bot + DB to run continuously (to be planned)
