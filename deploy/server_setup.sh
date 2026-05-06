@@ -87,16 +87,12 @@ fi
 # ── [5/7] .env ─────────────────────────────────────────────────────────────────
 log "=== [5/7] .env ==="
 if [[ -f "$APP_DIR/.env" ]]; then
-    done_ ".env already exists — skipping"
+    done_ ".env already exists"
 else
-    echo ""
-    echo ">>> Paste your full .env content now (Ctrl+D when done):"
-    cat > "$APP_DIR/.env"
-    grep -q "DATABASE_URL" "$APP_DIR/.env" \
-        || log "  WARNING: DATABASE_URL not found in .env"
-    grep -q "sqlite:///data/" "$APP_DIR/.env" \
-        || log "  WARNING: DATABASE_URL should be sqlite:///data/hireloop.db"
-    done_ ".env saved"
+    log "  Create your .env at $APP_DIR/.env before running step 6"
+    log "  Use: nano $APP_DIR/.env"
+    log "  DATABASE_URL must be: sqlite:///data/hireloop.db"
+    die ".env missing — create it and re-run"
 fi
 
 # ── [6/7] Migrate + start ──────────────────────────────────────────────────────
