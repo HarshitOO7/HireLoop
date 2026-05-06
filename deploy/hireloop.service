@@ -1,0 +1,20 @@
+[Unit]
+Description=HireLoop Telegram Bot
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/hireloop/app
+ExecStart=/usr/bin/docker compose up
+ExecStop=/usr/bin/docker compose down
+TimeoutStopSec=30
+Restart=on-failure
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hireloop
+
+[Install]
+WantedBy=multi-user.target

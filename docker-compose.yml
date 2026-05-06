@@ -5,6 +5,17 @@ services:
     build: .
     env_file: .env
     volumes:
-      - ./hireloop.db:/app/hireloop.db          # persist SQLite
-      - ./resume/output:/app/resume/output       # persist generated files
+      - /opt/hireloop/data:/app/data             # block storage — SQLite lives here
+      - /opt/hireloop/output:/app/resume/output  # block storage — generated files
+    restart: unless-stopped
+    depends_on:
+      - litestream
+
+  litestream:
+    image: litestream/litestream:latest
+    env_file: .env
+    volumes:
+      - /opt/hireloop/data:/data                 # same host dir the bot uses
+      - ./litestream.yml:/etc/litestream.yml
+    command: replicate
     restart: unless-stopped

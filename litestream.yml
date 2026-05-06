@@ -1,0 +1,17 @@
+dbs:
+  - path: /data/hireloop.db
+    replicas:
+      - type: s3
+        bucket: ${LITESTREAM_BUCKET}
+        path: hireloop.db
+        endpoint: https://${OCI_NAMESPACE}.compat.objectstorage.${LITESTREAM_REGION}.oraclecloud.com
+        region: ${LITESTREAM_REGION}
+        access-key-id: ${LITESTREAM_ACCESS_KEY}
+        secret-access-key: ${LITESTREAM_SECRET_KEY}
+        force-path-style: true
+
+        # Low-write Telegram bot — reduce API calls without sacrificing durability
+        sync-interval: 5s
+        snapshot-interval: 24h
+        retention: 168h              # 7 days
+        retention-check-interval: 1h
