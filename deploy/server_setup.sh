@@ -4,7 +4,7 @@
 set -euo pipefail
 
 # ── Config — edit before running ──────────────────────────────────────────────
-REPO_URL="${REPO_URL:-https://github.com/YOUR_USERNAME/hireloop.git}"
+REPO_URL="${REPO_URL:-https://github.com/HarshitOO7/HireLoop.git}"
 BLOCK_DEVICE="${BLOCK_DEVICE:-/dev/sdb}"
 # ──────────────────────────────────────────────────────────────────────────────
 
