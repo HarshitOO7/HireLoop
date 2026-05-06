@@ -401,9 +401,15 @@ All features shipped and tested:
 - **Resume curation**: CORE/RELEVANT/MARGINAL/CUT tiers, KEEP TEST, CUT LIST, matched_skills in AI prompt, omitted role reporting
 - **Application tracking**: /myapps history, outcome logging
 
+Hosting (done):
+- OCI Ampere A1 (ARM64, Always Free) — bot running 24/7
+- Docker + Litestream (SQLite → OCI Object Storage backup every 5s)
+- systemd auto-boot on server reboot
+- GitHub Actions CI/CD — push to main → auto-deploys via SSH
+- App dir: /opt/hireloop/app, DB: /mnt/blockdata/data/hireloop.db
+
 Next steps (to be planned):
-- VPS hosting — deploy bot + DB to run continuously
-- Self-hosted LLM — Ollama on VPS for zero-cost quality inference
+- Self-hosted LLM — Ollama on same OCI instance for zero-cost quality inference
 
 Scripts:
 - `python scripts/test_provider.py`  — AI provider smoke test
@@ -443,8 +449,8 @@ Scripts:
 ---
 
 ## Next Steps (immediate)
-- VPS hosting — deploy bot + DB to run continuously (to be planned)
-- Self-hosted LLM — Ollama on VPS for zero-cost quality inference (to be planned)
+- Self-hosted LLM — Ollama on OCI instance for zero-cost quality inference (to be planned)
+- Add DeepSeek provider — cheapest good model, great for fast/bulk tasks (to be planned)
 
 ## Phase 2 (after 30 days of real usage)
 - Recruiter finder (3-tier: parse JD → LinkedIn search → web search)
@@ -466,7 +472,7 @@ Scripts:
 
 ## Current Status
 
-Phase 1 complete. All features shipped.
+Phase 1 complete. All features shipped and hosted.
 
 Scraper status:
 - Indeed ✅

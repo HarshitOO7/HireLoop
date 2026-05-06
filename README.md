@@ -78,7 +78,7 @@ Scrape jobs  →  Score fit  →  Verify skills  →  Generate resume  →  You 
 | Omitted role transparency (bot surfaces every dropped role to user) | ✅ Done |
 | Humanization rules — no em dashes, no AI buzzwords (global, all resumes) | ✅ Done |
 | Ground-truth facts injection — degree/dates/GPA locked via `<facts>` block | ✅ Done |
-| VPS hosting — deploy bot + DB to run continuously | 🔜 Next |
+| VPS hosting — OCI Ampere A1, Docker, Litestream, systemd, CI/CD | ✅ Done |
 | Self-hosted LLM — Ollama on VPS for zero-cost quality inference | 🔜 Next |
 | Recruiter finder | 🔜 Phase 2 |
 | Embedding-based fit scoring (RAG / semantic similarity) | 🔜 Phase 3 |
@@ -699,9 +699,14 @@ applications
 - [x] Humanization — WRITING STYLE rules ban em dashes + AI buzzwords across all system prompts
 - [x] Ground-truth facts — `resume_facts` extracted at upload, injected as locked `<facts>` block into every `tailor_resume()` call to prevent hallucination of dates/degrees/GPA
 
+### Hosting
+- [x] OCI Ampere A1 (ARM64, Always Free) — 4 vCPU, 24 GB RAM, $0/month
+- [x] Docker + Litestream — SQLite replicated to OCI Object Storage every 5s
+- [x] systemd auto-boot — bot restarts on server reboot
+- [x] GitHub Actions CI/CD — push to main → auto-deploys via SSH
+
 ### Next Steps
-- [ ] VPS hosting — deploy bot + DB to run continuously (to be planned)
-- [ ] Self-hosted LLM — Ollama on VPS for zero-cost quality inference (to be planned)
+- [ ] Self-hosted LLM — Ollama on same OCI instance for zero-cost quality inference
 
 ### Phase 2 — Multi-user + Intelligence
 - [ ] Recruiter finder (3-tier: JD parse → LinkedIn → web search)
