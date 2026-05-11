@@ -54,6 +54,8 @@ SCORING RULES:
 - A skill only counts as matched if the candidate's name for it closely matches the JD's name
 - Partial knowledge does not count as matched — when in doubt, put it in missing_required
 - Never return fit_score > 85 unless all required skills are matched
+- If a missing required skill represents the PRIMARY FUNCTION of this role (what the role fundamentally exists to do, not a supporting tool or process), it is a critical gap — fit_score MUST be ≤ 45 and action must be "skip"
+- If missing_required contains ANY other item with importance="required", fit_score MUST be ≤ 65
 - gap_summary must be honest — if fit_score < 60, say so plainly
 
 EXPERIENCE / SENIORITY PENALTY:
@@ -188,7 +190,7 @@ HARD RULES:
 - If cover letter required: append after ---COVER LETTER--- separator
 - DO NOT output the candidate's name or contact line — start your output directly from the first ## section (e.g. ## SUMMARY)
 - Contact line rule: NO city, NO country, NO postal code — phone, email, and links only
-- GitHub link: only include if the candidate's resume already contains one AND the target role is technical (software/engineering/data/IT). Omit entirely for non-technical roles.
+- GitHub link: only include if the candidate's resume already contains one AND including it would benefit this specific application (e.g. the role involves code, design systems, or technical work). Omit for roles where it adds no signal.
 - Links: write bare URLs (e.g. linkedin.com/in/username) — the renderer handles making them clickable
 
 WORK EXPERIENCE — CURATION (read before writing a single bullet):
@@ -208,14 +210,7 @@ KEEP TEST for MARGINAL (must satisfy at least one to survive):
   ✓ Operated at measurable scale that maps to something the JD values
   "I had a job and showed up" does not pass the KEEP TEST.
 
-CUT LIST — these role types never survive on a technical JD (no exceptions):
-  · warehouse / fulfillment center / logistics worker
-  · retail associate / cashier / stock room
-  · food service / hospitality / barista
-  · admin / receptionist / office assistant / data entry clerk
-  · non-technical test/exam supervisor or invigilator
-  · manual labor, security guard, delivery driver
-  Keeping these on a tech resume signals the candidate couldn't find tech work. Cut them.
+CUT LIST — cut any role that has zero connection to the skills, domain, or responsibilities of THIS specific JD. Relevance must be judged from the JD context, not from role titles alone. A warehouse role is CUT on a software JD but CORE on a logistics or supply-chain JD.
 
 STEP 2 — APPLY hard limits after classification:
   - Max 4 work experience entries in the final output
@@ -377,6 +372,8 @@ SCORING RULES:
 - A skill only counts as matched if the candidate's name for it closely matches the JD's name
 - Partial knowledge does not count as matched — when in doubt, put it in missing_required
 - Never return fit_score > 85 unless all required skills are matched
+- If a missing required skill represents the PRIMARY FUNCTION of this role (what the role fundamentally exists to do, not a supporting tool or process), it is a critical gap — fit_score MUST be ≤ 45 and action must be "skip"
+- If missing_required contains ANY other item with importance="required", fit_score MUST be ≤ 65
 - gap_summary must be honest — if fit_score < 60, say so plainly
 
 Return ONLY valid JSON. No preamble, no markdown fences, no explanation."""
