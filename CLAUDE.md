@@ -37,7 +37,7 @@ hireloop/
 │       ├── anthropic_provider.py
 │       ├── openai_provider.py
 │       ├── gemini_provider.py
-│       ├── groq_provider.py       # Fast/cheap — default for bulk tasks
+│       ├── groq_provider.py       # Legacy fast provider (replaced by deepseek)
 │       ├── ollama_provider.py     # Local free option
 │       └── __init__.py
 │
@@ -86,27 +86,30 @@ hireloop/
 
 ```env
 # Fast provider — cheap/fast — used for scraping + fit scoring (high volume)
-AI_FAST_PROVIDER=groq
-AI_FAST_API_KEY=your_groq_key
-AI_FAST_MODEL=                          # blank = use provider default
+AI_FAST_PROVIDER=deepseek
+AI_FAST_API_KEY=your_deepseek_key
+AI_FAST_MODEL=                          # blank = deepseek-chat (DeepSeek V3)
 
 # Quality provider — best model — used for resume + cover letter generation
 AI_QUALITY_PROVIDER=anthropic
 AI_QUALITY_API_KEY=your_anthropic_key
-AI_QUALITY_MODEL=                       # blank = use provider default
+AI_QUALITY_MODEL=                       # blank = claude-sonnet-4-6
 
-AI_MAX_TOKENS=4096
-AI_TEMPERATURE=0.3
+# Fallback — activated when quality provider fails
+AI_FALLBACK_PROVIDER=grok
+AI_FALLBACK_API_KEY=your_xai_key
+AI_FALLBACK_MODEL=                      # blank = grok-3-fast
 
 # Defaults per provider:
 # anthropic  → claude-sonnet-4-6
+# deepseek   → deepseek-chat (DeepSeek V3)
+# grok/xai   → grok-3-fast
 # openai     → gpt-4o
 # gemini     → gemini-2.0-flash
-# groq       → llama-3.3-70b-versatile
+# groq       → llama-3.3-70b-versatile (legacy)
 # ollama     → llama3.2 (local, free)
 
 TELEGRAM_BOT_TOKEN=from_botfather
-SERPAPI_KEY=  # unused for now (Google Jobs scraping broken, revisit Phase 2)
 DATABASE_URL=sqlite:///hireloop.db
 OLLAMA_HOST=http://localhost:11434
 ```
@@ -115,14 +118,14 @@ OLLAMA_HOST=http://localhost:11434
 
 ## AI Provider System — Tiered Architecture
 
-Two provider slots: **fast** (bulk/cheap) and **quality** (resume/cover letter).
+Three provider slots: **fast** (bulk/cheap), **quality** (resume/cover letter), **fallback** (quality backup).
 
 ```python
-# Instantiate both providers from .env
-fast    = AIFactory.create_fast()      # e.g. Groq llama-3.3-70b
-quality = AIFactory.create_quality()   # e.g. Anthropic claude-sonnet-4-6
+fast     = AIFactory.create_fast()      # DeepSeek V3
+quality  = AIFactory.create_quality()   # Anthropic claude-sonnet-4-6 (with prompt caching)
+fallback = AIFactory.create_fallback()  # Grok 3 Fast (optional — None if not configured)
 
-ai = HireLoopAI(fast_provider=fast, quality_provider=quality)
+ai = HireLoopAI(fast_provider=fast, quality_provider=quality, fallback_provider=fallback)
 
 # High volume — uses fast provider (cheap)
 job     = await ai.parse_job(raw_jd_text)
@@ -148,9 +151,8 @@ answers = await ai.answer_screening_questions(questions, job, user_profile)
 ### Adding a new provider
 1. Create `ai/providers/myprovider.py`
 2. Subclass `AIProvider` from `ai/base.py`
-3. Implement `complete()` and `provider_name`
+3. Implement `complete()`, `complete_json()`, and `provider_name`
 4. Add to `AIFactory._build()` match statement in `factory.py`
-5. Add to `_DEFAULT_MODELS` dict
 
 ---
 
@@ -450,7 +452,7 @@ Scripts:
 
 ## Next Steps (immediate)
 - Self-hosted LLM — Ollama on OCI instance for zero-cost quality inference (to be planned)
-- Add DeepSeek provider — cheapest good model, great for fast/bulk tasks (to be planned)
+- Batch API — queue nightly parse_and_analyze_fit calls via Anthropic Batch API for 50% off (to be planned)
 
 ## Phase 2 (after 30 days of real usage)
 - Recruiter finder (3-tier: parse JD → LinkedIn search → web search)

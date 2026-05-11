@@ -8,15 +8,16 @@ load_dotenv()
 class AIFactory:
     """Creates AI provider instances from environment variables.
 
-    Two slots:
+    Three slots:
       - fast: cheap/high-volume provider (parse_job, analyze_fit)
       - quality: best provider (tailor_resume, write_cover_letter)
+      - fallback: standby for when quality provider fails (optional)
     """
 
     @classmethod
     def create_fast(cls) -> AIProvider:
         return cls._build(
-            provider=os.getenv("AI_FAST_PROVIDER", "groq"),
+            provider=os.getenv("AI_FAST_PROVIDER", "deepseek"),
             api_key=os.getenv("AI_FAST_API_KEY", ""),
             model=os.getenv("AI_FAST_MODEL", ""),
         )
@@ -27,6 +28,17 @@ class AIFactory:
             provider=os.getenv("AI_QUALITY_PROVIDER", "anthropic"),
             api_key=os.getenv("AI_QUALITY_API_KEY", ""),
             model=os.getenv("AI_QUALITY_MODEL", ""),
+        )
+
+    @classmethod
+    def create_fallback(cls) -> "AIProvider | None":
+        provider = os.getenv("AI_FALLBACK_PROVIDER", "")
+        if not provider:
+            return None
+        return cls._build(
+            provider=provider,
+            api_key=os.getenv("AI_FALLBACK_API_KEY", ""),
+            model=os.getenv("AI_FALLBACK_MODEL", ""),
         )
 
     @classmethod
@@ -41,6 +53,12 @@ class AIFactory:
             case "groq":
                 from ai.providers.groq_provider import GroqProvider
                 return GroqProvider(api_key=api_key, model=model)
+            case "deepseek":
+                from ai.providers.deepseek_provider import DeepSeekProvider
+                return DeepSeekProvider(api_key=api_key, model=model)
+            case "grok" | "xai":
+                from ai.providers.grok_provider import GrokProvider
+                return GrokProvider(api_key=api_key, model=model)
             case "gemini":
                 from ai.providers.gemini_provider import GeminiProvider
                 return GeminiProvider(api_key=api_key, model=model)
@@ -50,5 +68,5 @@ class AIFactory:
             case _:
                 raise ValueError(
                     f"Unknown AI provider: '{provider}'. "
-                    "Valid options: anthropic, openai, groq, gemini, ollama"
+                    "Valid options: anthropic, openai, groq, deepseek, grok, gemini, ollama"
                 )

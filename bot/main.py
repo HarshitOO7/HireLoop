@@ -246,8 +246,11 @@ def main():
     # Build tiered AI
     fast = AIFactory.create_fast()
     quality = AIFactory.create_quality()
-    ai = HireLoopAI(fast_provider=fast, quality_provider=quality)
-    logger.info(f"AI ready — fast: {fast.provider_name}, quality: {quality.provider_name}")
+    fallback = AIFactory.create_fallback()
+    ai = HireLoopAI(fast_provider=fast, quality_provider=quality, fallback_provider=fallback)
+    fallback_name = fallback.provider_name if fallback else "none"
+    logger.info("AI ready — fast: %s, quality: %s, fallback: %s",
+                fast.provider_name, quality.provider_name, fallback_name)
 
     async def _post_init(application):
         scheduler = build_scheduler(application.bot, ai)

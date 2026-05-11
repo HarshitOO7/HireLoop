@@ -555,9 +555,47 @@ class HireLoopAI:
     - quality_provider: tailor_resume, write_cover_letter, answer_screening_questions
     """
 
-    def __init__(self, fast_provider: AIProvider, quality_provider: AIProvider):
+    def __init__(
+        self,
+        fast_provider: AIProvider,
+        quality_provider: AIProvider,
+        fallback_provider: "AIProvider | None" = None,
+    ):
         self._fast = fast_provider
         self._quality = quality_provider
+        self._fallback = fallback_provider
+
+    async def _quality_complete(
+        self, prompt: str, system: str, max_tokens: int | None = None
+    ) -> str:
+        try:
+            return await self._quality.complete(prompt, system=system, max_tokens=max_tokens)
+        except Exception as exc:
+            if self._fallback:
+                logger.warning("[quality] %s failed (%s) — falling back to %s",
+                               self._quality.provider_name, exc, self._fallback.provider_name)
+                return await self._fallback.complete(prompt, system=system, max_tokens=max_tokens)
+            raise
+
+    async def _quality_complete_json(
+        self,
+        prompt: str,
+        system: str,
+        schema: "dict | None" = None,
+        max_tokens: int | None = None,
+    ) -> str:
+        try:
+            return await self._quality.complete_json(
+                prompt, system=system, schema=schema, max_tokens=max_tokens
+            )
+        except Exception as exc:
+            if self._fallback:
+                logger.warning("[quality] %s failed (%s) — falling back to %s",
+                               self._quality.provider_name, exc, self._fallback.provider_name)
+                return await self._fallback.complete_json(
+                    prompt, system=system, schema=schema, max_tokens=max_tokens
+                )
+            raise
 
     async def parse_job(self, raw_jd_text: str) -> dict:
         logger.info("[parse_job] START — jd text %d chars", len(raw_jd_text))
@@ -616,6 +654,7 @@ class HireLoopAI:
             jd_text=_slim_job(job, ("title", "required_skills", "preferred_skills",
                                     "seniority", "years_experience", "cover_letter_required")),
             skill_graph_json=_jc(slim_skills),
+            candidate_years=user_profile.get("years_experience", "not specified"),
             variant_tags=", ".join(user_profile.get("variant_tags", ["general"])),
         )
         logger.info("[analyze_fit] sending to %s — prompt %d chars", self._fast.provider_name, len(prompt))
@@ -671,7 +710,7 @@ class HireLoopAI:
         )
         logger.info("[tailor_resume] sending to %s (quality) — prompt %d chars",
                     self._quality.provider_name, len(prompt))
-        result = await self._quality.complete(prompt, system=_TAILOR_SYSTEM, max_tokens=3500)
+        result = await self._quality_complete(prompt, system=_TAILOR_SYSTEM, max_tokens=3500)
         logger.info("[tailor_resume] DONE %.2fs — output %d chars", time.monotonic() - t0, len(result))
         return result
 
@@ -702,7 +741,7 @@ class HireLoopAI:
         )
         logger.info("[patch_resume] sending to %s (quality) — prompt %d chars",
                     self._quality.provider_name, len(prompt))
-        result = await self._quality.complete(prompt, system=_PATCH_SYSTEM, max_tokens=1500)
+        result = await self._quality_complete(prompt, system=_PATCH_SYSTEM, max_tokens=1500)
         logger.info("[patch_resume] DONE %.2fs — output %d chars", time.monotonic() - t0, len(result))
         return result
 
@@ -727,7 +766,7 @@ class HireLoopAI:
         )
         logger.info("[write_cover_letter] sending to %s (quality) — prompt %d chars",
                     self._quality.provider_name, len(prompt))
-        result = await self._quality.complete(prompt, system=_COVER_LETTER_SYSTEM, max_tokens=800)
+        result = await self._quality_complete(prompt, system=_COVER_LETTER_SYSTEM, max_tokens=800)
         logger.info("[write_cover_letter] DONE %.2fs — output %d chars", time.monotonic() - t0, len(result))
         return result
 
@@ -799,7 +838,7 @@ class HireLoopAI:
         logger.info("[answer_screening] sending to %s (quality) — prompt %d chars",
                     self._quality.provider_name, len(prompt))
         t_ai = time.monotonic()
-        raw = await self._quality.complete_json(prompt, system=_SCREENING_SYSTEM, max_tokens=600)
+        raw = await self._quality_complete_json(prompt, system=_SCREENING_SYSTEM, max_tokens=600)
         logger.info("[answer_screening] AI responded in %.2fs — raw %d chars", time.monotonic() - t_ai, len(raw))
         result = _parse_json(raw)
         logger.info("[answer_screening] DONE %.2fs — answered %d questions", time.monotonic() - t0, len(result))
