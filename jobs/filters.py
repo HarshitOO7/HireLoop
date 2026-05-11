@@ -242,6 +242,7 @@ def apply_filters(
     seen_keys: set[tuple] | None = None,
     search_terms: list[str] | None = None,
     hours_old: int | None = None,
+    company_cooldown: dict[str, int] | None = None,
 ) -> list[dict]:
     """
     Filter raw JobSpy results. Returns filtered list with 'url_hash' added.
@@ -251,22 +252,25 @@ def apply_filters(
       1. No description → skip
       2. URL hash match → skip (exact same URL seen before)
       3. Semantic match (title+company) → skip (same job on another board)
+      3b. Company cooldown → skip if company already has ≥2 jobs in last 7 days
       4. Blacklist → skip
       4b. Role relevance → skip if title shares no tokens with search terms
       5. Salary gate → skip
       6. Years of experience → skip if job clearly requires more than user has
 
     Args:
-        raw_jobs:     List of dicts from jobspy
-        user_filters: User.filters JSON — role, location, remote, min_salary,
-                      blacklist, years_of_exp
-        seen_hashes:  Set of url_hash values already in DB for this user
-        seen_keys:    Set of (title, company) tuples already in DB
-        search_terms: All role titles sent to the scraper (base role + AI variants).
-                      Used to build a relevance token set — works for any role/industry.
-                      If None, falls back to user_filters["role"]; if still empty, skip check.
-        hours_old:    Drop jobs whose date_posted is older than this many hours.
-                      If None, date check is skipped (job boards are trusted to filter by age).
+        raw_jobs:         List of dicts from jobspy
+        user_filters:     User.filters JSON — role, location, remote, min_salary,
+                          blacklist, years_of_exp
+        seen_hashes:      Set of url_hash values already in DB for this user
+        seen_keys:        Set of (title, company) tuples already in DB
+        search_terms:     All role titles sent to the scraper (base role + AI variants).
+                          Used to build a relevance token set — works for any role/industry.
+                          If None, falls back to user_filters["role"]; if still empty, skip check.
+        hours_old:        Drop jobs whose date_posted is older than this many hours.
+                          If None, date check is skipped (job boards are trusted to filter by age).
+        company_cooldown: Dict of {company_lower: job_count} for the last 7 days.
+                          Companies with ≥2 entries are skipped to prevent daily-repost spam.
     """
     blacklist  = [b.lower().strip() for b in (user_filters.get("blacklist") or []) if b]
     min_salary = int(user_filters.get("min_salary") or 0)
@@ -282,7 +286,7 @@ def apply_filters(
     cutoff = datetime.now() - timedelta(hours=hours_old) if hours_old else None
 
     out = []
-    skipped_nodesc = skipped_seen = skipped_semantic = 0
+    skipped_nodesc = skipped_seen = skipped_semantic = skipped_company_cd = 0
     skipped_blacklist = skipped_salary = skipped_years = skipped_irrelevant = 0
     skipped_stale = 0
 
@@ -316,9 +320,17 @@ def apply_filters(
             continue
         _seen_keys.add(key)
 
-        # 4. Blacklist
         company = key[1]
         title   = key[0]
+
+        # 3b. Company cooldown — skip repeat-posting companies (e.g. Outlier AI daily reposts)
+        if company_cooldown and company_cooldown.get(company, 0) >= 2:
+            skipped_company_cd += 1
+            logger.debug("[filters] company cooldown: skipped %r — %d recent job(s) from %r",
+                         title, company_cooldown[company], company)
+            continue
+
+        # 4. Blacklist
         if blacklist and any(term in company or term in title for term in blacklist):
             skipped_blacklist += 1
             continue
@@ -361,9 +373,9 @@ def apply_filters(
 
     logger.info(
         "[filters] in=%d  out=%d | skipped: stale=%d  no_desc=%d  url=%d  semantic=%d  "
-        "blacklist=%d  irrelevant=%d  salary=%d  years=%d",
+        "company_cd=%d  blacklist=%d  irrelevant=%d  salary=%d  years=%d",
         len(raw_jobs), len(out),
         skipped_stale, skipped_nodesc, skipped_seen, skipped_semantic,
-        skipped_blacklist, skipped_irrelevant, skipped_salary, skipped_years,
+        skipped_company_cd, skipped_blacklist, skipped_irrelevant, skipped_salary, skipped_years,
     )
     return out

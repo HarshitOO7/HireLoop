@@ -8,6 +8,7 @@ import logging
 from datetime import datetime
 from telegram import Update
 from telegram.ext import (
+    CallbackQueryHandler,
     ContextTypes,
     CommandHandler,
     ConversationHandler,
@@ -19,7 +20,7 @@ from sqlalchemy.orm import selectinload
 
 from db.session import AsyncSessionLocal
 from db.models import User, SkillNode
-from bot.keyboards import MAIN_KEYBOARD
+from bot.keyboards import MAIN_KEYBOARD, TZ_OPTIONS, timezone_keyboard
 
 logger = logging.getLogger(__name__)
 
@@ -262,6 +263,8 @@ async def cmd_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
     f = user.filters or {}
     blacklist    = ", ".join(f.get("blacklist", [])) or "none"
     instructions = f.get("resume_instructions", "") or "none"
+    tz_name      = getattr(user, "timezone", None) or "America/Vancouver"
+    tz_label     = _TZ_LABELS.get(tz_name, tz_name)
     lines = [
         "<b>Current Settings</b>\n",
         "Role: " + _e(f.get("role", "not set")),
@@ -271,9 +274,10 @@ async def cmd_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Blacklist: " + _e(blacklist),
         "Notify frequency: " + _e(user.notify_freq or "daily"),
         "Min fit score: " + _e(user.min_fit_score) + "%",
+        "Timezone: " + _e(tz_label),
         "Status: " + ("paused" if f.get("paused") else "active"),
         "Resume instructions: <i>" + _e(instructions) + "</i>",
-        "\nRun /start to update filters, /instructions to update resume instructions.",
+        "\nRun /start to update filters, /instructions to update resume instructions, /timezone to change timezone.",
     ]
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
@@ -418,6 +422,62 @@ def build_instructions_handler() -> ConversationHandler:
     )
 
 
+_TZ_LABELS: dict[str, str] = {
+    "America/Vancouver": "Pacific (CA/US West)",
+    "America/Denver":    "Mountain (US)",
+    "America/Chicago":   "Central (US)",
+    "America/New_York":  "Eastern (US)",
+    "UTC":               "UTC",
+    "Europe/London":     "London",
+    "Europe/Berlin":     "Berlin",
+    "Asia/Kolkata":      "India (IST)",
+    "Asia/Singapore":    "Singapore (SGT)",
+}
+
+
+async def cmd_timezone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    tg_id = str(update.effective_user.id)
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(User).where(User.telegram_id == tg_id))
+        user = result.scalar_one_or_none()
+
+    if not user:
+        await update.message.reply_text("Run /start first.")
+        return
+
+    current = getattr(user, "timezone", None) or "America/Vancouver"
+    label   = _TZ_LABELS.get(current, current)
+    await update.message.reply_text(
+        f"Current timezone: <b>{_e(label)}</b>\n\nSelect your timezone:",
+        parse_mode="HTML",
+        reply_markup=timezone_keyboard(),
+    )
+
+
+async def _timezone_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    iana = TZ_OPTIONS.get(query.data)
+    if not iana:
+        return
+
+    tg_id = str(update.effective_user.id)
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            result = await session.execute(select(User).where(User.telegram_id == tg_id))
+            user = result.scalar_one_or_none()
+            if not user:
+                return
+            user.timezone = iana
+
+    label = _TZ_LABELS.get(iana, iana)
+    await query.edit_message_text(
+        f"Timezone set to <b>{_e(label)}</b>.\n\n"
+        f"Scrapes will now run at 08:00 and 18:00 your local time (Mon–Fri).",
+        parse_mode="HTML",
+    )
+
+
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "<b>HireLoop Commands</b>\n\n"
@@ -427,6 +487,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/instructions -- set standing instructions for all resumes\n"
         "/settings -- view all preferences\n"
         "/filters -- view current job filters\n"
+        "/timezone -- set your timezone for scheduled scrapes\n"
         "/pause -- pause or resume job hunting\n"
         "/deleteskill -- remove a skill by name\n"
         "/cancel -- cancel current operation\n"
@@ -448,6 +509,8 @@ def get_settings_handlers():
         CommandHandler("pause", cmd_pause),
         CommandHandler("settings", cmd_settings),
         CommandHandler("filters", cmd_filters),
+        CommandHandler("timezone", cmd_timezone),
         CommandHandler("help", cmd_help),
         CommandHandler("menu", cmd_menu),
+        CallbackQueryHandler(_timezone_callback, pattern=r"^tz_"),
     ]

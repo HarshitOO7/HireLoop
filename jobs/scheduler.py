@@ -2,11 +2,11 @@
 APScheduler-based job scrape loop — embedded in the bot process.
 
 Schedule:
-  - 08:00 daily  → morning scrape (all users)
-  - 18:00 daily  → evening scrape (all users)
+  - Hourly tick (Mon–Fri) → per-user timezone check → fires at 08:00 and 18:00 local time
 
 Each cycle:
   scrape → filter → parse_job → analyze_fit → send first job card to Telegram → save to DB
+  Background batch completes and sends a summary ("N more matched").
   After user acts on a card, send_next_pending_card() delivers the next one.
 """
 
@@ -15,9 +15,10 @@ import logging
 import time
 import uuid
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 
 from bot.keyboards import job_card_keyboard
 from db.models import Job, SkillNode, User
@@ -30,15 +31,27 @@ logger = logging.getLogger(__name__)
 
 # ── DB helpers ───────────────────────────────────────────────────────────────
 
-async def _get_seen(user_id: str, session) -> tuple[set[str], set[tuple]]:
-    """One query — returns (url_hashes, semantic_keys) for fast pre-AI dedup."""
+async def _get_seen(user_id: str, session) -> tuple[set[str], set[tuple], dict[str, int]]:
+    """Returns (url_hashes, semantic_keys, recent_company_counts) for pre-AI dedup."""
     result = await session.execute(
         select(Job.url_hash, Job.title, Job.company).where(Job.user_id == user_id)
     )
     rows = result.all()
     hashes = {r[0] for r in rows if r[0]}
     keys   = {((r[1] or "").lower().strip(), (r[2] or "").lower().strip()) for r in rows}
-    return hashes, keys
+
+    cutoff = datetime.utcnow() - timedelta(days=7)
+    recent = await session.execute(
+        select(Job.company, func.count()).select_from(Job)
+        .where(Job.user_id == user_id, Job.created_at >= cutoff)
+        .group_by(Job.company)
+    )
+    company_counts = {
+        (c or "").lower().strip(): n
+        for c, n in recent.all()
+        if c
+    }
+    return hashes, keys, company_counts
 
 
 async def _get_user_profile(user_id: str, session) -> dict:
@@ -186,10 +199,12 @@ async def _analyze_remaining(
     skill_keywords: set,
     skill_tokens: set,
     ai,
+    bot=None,
 ) -> None:
-    """Background task: analyze remaining batches silently and save to DB."""
+    """Background task: analyze remaining batches, save to DB, then send a completion summary."""
     sem   = asyncio.Semaphore(2)   # reduced from 5 to avoid 429s
     BATCH = 5
+    bg_qualifying: list[Job] = []
 
     async def _bg_one(raw) -> tuple:
         desc    = raw.get("description") or ""
@@ -212,11 +227,47 @@ async def _analyze_remaining(
         batch   = jobs[i:i + BATCH]
         results = await asyncio.gather(*[_bg_one(raw) for raw in batch])
         for result in results:
-            await _save_job_result(*result, user=user, qualifying=None)
+            await _save_job_result(*result, user=user, qualifying=bg_qualifying)
         logger.info("[scheduler] background batch %d–%d / %d done",
                     i + 1, i + len(batch), len(jobs))
         if i + BATCH < len(jobs):
             await asyncio.sleep(2)   # breathing room between batches
+
+    if bot:
+        n_more = len(bg_qualifying)
+        if n_more > 0:
+            await bot.send_message(
+                chat_id=user.telegram_id,
+                text=(
+                    f"✅ Analysis done — *{n_more} more job{'s' if n_more != 1 else ''}* matched. "
+                    f"Tap 📋 Pending Jobs to continue."
+                ),
+                parse_mode="Markdown",
+            )
+        else:
+            await bot.send_message(
+                chat_id=user.telegram_id,
+                text="✅ Background analysis done — no additional matches found.",
+            )
+
+
+def _weekday_days_since(dt: datetime | None) -> int:
+    """Count Mon–Fri days elapsed since dt. Returns 999 if dt is None."""
+    if dt is None:
+        return 999
+    now = datetime.utcnow()
+    if (now - dt).total_seconds() < 0:
+        return 0
+    if (now - dt).days > 10:
+        return 10  # fast path — definitely > 3 weekdays
+    count = 0
+    current = dt.date()
+    end = now.date()
+    while current < end:
+        if current.weekday() < 5:  # Mon=0 … Fri=4
+            count += 1
+        current += timedelta(days=1)
+    return count
 
 
 async def _process_user(user: User, bot, ai, is_manual: bool = False) -> int:
@@ -235,7 +286,7 @@ async def _process_user(user: User, bot, ai, is_manual: bool = False) -> int:
 
     async with AsyncSessionLocal() as session:
         async with session.begin():
-            seen_hashes, seen_keys = await _get_seen(user.id, session)
+            seen_hashes, seen_keys, company_counts = await _get_seen(user.id, session)
             profile = await _get_user_profile(user.id, session)
 
     from jobs.scraper import _hours_for_freq
@@ -245,6 +296,7 @@ async def _process_user(user: User, bot, ai, is_manual: bool = False) -> int:
         raw_jobs, user.filters or {}, seen_hashes, seen_keys,
         search_terms=role_variants or None,
         hours_old=hours_old,
+        company_cooldown=company_counts,
     )
 
     if not filtered:
@@ -314,7 +366,7 @@ async def _process_user(user: User, bot, ai, is_manual: bool = False) -> int:
     # ── Fire background task for whatever is left ─────────────────────────────
     if rest:
         asyncio.create_task(
-            _analyze_remaining(rest, user, profile, skill_keywords, skill_tokens, ai)
+            _analyze_remaining(rest, user, profile, skill_keywords, skill_tokens, ai, bot=bot)
         )
 
     # ── Send first-batch summary + first card ─────────────────────────────────
@@ -435,6 +487,44 @@ async def run_scrape_cycle(bot, ai, telegram_id: str | None = None) -> int:
     is_manual = telegram_id is not None
     total = 0
     for user in users:
+        if not is_manual:
+            # Timezone gate: only process at 08:00 and 18:00 in the user's local time
+            tz_name = getattr(user, "timezone", None) or "America/Vancouver"
+            try:
+                local_hour = datetime.now(ZoneInfo(tz_name)).hour
+            except Exception:
+                local_hour = datetime.utcnow().hour
+            if local_hour not in (8, 18):
+                continue
+
+            # Inactivity gate: skip if user hasn't interacted for > 3 weekdays
+            # Only applies once last_active is tracked (None = new column, skip check)
+            if user.last_active is not None:
+                weekday_inactive = _weekday_days_since(user.last_active)
+                if weekday_inactive > 3:
+                    last_warned_str = (user.filters or {}).get("inactivity_warned_at")
+                    last_warned = None
+                    if last_warned_str:
+                        try:
+                            last_warned = datetime.fromisoformat(last_warned_str)
+                        except Exception:
+                            pass
+                    if last_warned and (datetime.utcnow() - last_warned).days < 5:
+                        logger.info("[scheduler] skipping inactive user=%s (warned recently)", user.telegram_id)
+                        continue
+                    await bot.send_message(
+                        chat_id=user.telegram_id,
+                        text="You've been inactive for a few days — send any message or tap 🔍 Fetch Jobs to resume auto-scraping.",
+                    )
+                    new_filters = {**(user.filters or {}), "inactivity_warned_at": datetime.utcnow().isoformat()}
+                    async with AsyncSessionLocal() as session:
+                        async with session.begin():
+                            await session.execute(
+                                update(User).where(User.id == user.id).values(filters=new_filters)
+                            )
+                    logger.info("[scheduler] inactivity warning sent to user=%s", user.telegram_id)
+                    continue
+
         if (user.filters or {}).get("paused"):
             logger.info("[scheduler] skipping paused user=%s", user.telegram_id)
             continue
@@ -452,21 +542,17 @@ async def run_scrape_cycle(bot, ai, telegram_id: str | None = None) -> int:
 
 def build_scheduler(bot, ai) -> AsyncIOScheduler:
     """
-    Build the APScheduler instance with two daily jobs.
+    Build the APScheduler instance with a single hourly tick (Mon–Fri).
+    Per-user timezone checks inside run_scrape_cycle fire at 08:00 and 18:00 local time.
     Call scheduler.start() to activate, scheduler.shutdown() to stop.
     """
     scheduler = AsyncIOScheduler()
 
-    common = dict(args=[bot, ai], replace_existing=True)
-
     scheduler.add_job(
-        run_scrape_cycle, "cron", hour=8,  minute=0,
-        id="scrape_morning", name="Morning scrape (08:00)", **common,
-    )
-    scheduler.add_job(
-        run_scrape_cycle, "cron", hour=18, minute=0,
-        id="scrape_evening", name="Evening scrape (18:00)", **common,
+        run_scrape_cycle, "cron", minute=0, day_of_week="mon-fri",
+        id="scrape_hourly", name="Hourly scrape tick (Mon–Fri)",
+        args=[bot, ai], replace_existing=True,
     )
 
-    logger.info("[scheduler] built — jobs scheduled at 08:00 and 18:00 daily")
+    logger.info("[scheduler] built — hourly tick (Mon–Fri), fires at 08:00 and 18:00 per user timezone")
     return scheduler

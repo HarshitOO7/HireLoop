@@ -167,11 +167,13 @@ class User(Base):
     telegram_id     = Column(String, unique=True)
     name            = Column(String)
     filters         = Column(JSON)     # role, location, salary, remote, blacklist
-    notify_freq     = Column(String)   # "daily" | "realtime"
+    notify_freq     = Column(String)   # "daily" | "twice_daily"
     min_fit_score   = Column(Integer, default=60)
     daily_app_limit = Column(Integer, default=5)
     onboarded       = Column(Boolean, default=False)
     created_at      = Column(DateTime)
+    last_active     = Column(DateTime, nullable=True)   # updated on every interaction
+    timezone        = Column(String, default="America/Vancouver")  # IANA tz string
 
 class SkillNode(Base):
     __tablename__ = "skill_nodes"
@@ -240,6 +242,7 @@ class Application(Base):
 /history   - Past applications + outcomes
 /settings  - Edit all preferences
 /filters   - Quick filter access
+/timezone  - Set timezone for scheduled scrapes
 /pause     - Pause job hunting
 /help      - Full command list
 ```
@@ -451,8 +454,18 @@ Scripts:
 ---
 
 ## Next Steps (immediate)
-- Self-hosted LLM — Ollama on OCI instance for zero-cost quality inference (to be planned)
 - Batch API — queue nightly parse_and_analyze_fit calls via Anthropic Batch API for 50% off (to be planned)
+- Self-hosted LLM — Ollama on OCI instance for zero-cost quality inference (to be planned)
+
+## Recent Changes (May 2026)
+- **Scheduler**: Replaced fixed 08:00/18:00 UTC cron with hourly tick (Mon–Fri) + per-user timezone check via `zoneinfo`
+- **Timezone**: Added `user.timezone` field (IANA string, default `America/Vancouver`); `/timezone` command with preset list
+- **Inactivity**: Added `user.last_active` field; weekday-only inactivity gate (>3 business days → warn once); weekends excluded from count
+- **Company dedup**: `_get_seen()` now returns `recent_company_counts`; `apply_filters()` skips companies with ≥2 jobs in last 7 days
+- **Background analysis**: `_analyze_remaining()` now sends completion summary ("N more matched") after finishing
+- **Realtime removed**: `freq_realtime` option removed from frequency keyboard, onboarding, and `_hours_for_freq()`
+- **AI providers**: DeepSeek V3 as fast provider, Grok as fallback, Anthropic prompt caching (`cache_control: ephemeral`)
+- **DB migration**: New columns require `ALTER TABLE users ADD COLUMN last_active DATETIME` + `ADD COLUMN timezone TEXT DEFAULT 'America/Vancouver'` on existing DBs
 
 ## Phase 2 (after 30 days of real usage)
 - Recruiter finder (3-tier: parse JD → LinkedIn search → web search)

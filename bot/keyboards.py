@@ -82,13 +82,10 @@ def years_exp_keyboard() -> InlineKeyboardMarkup:
 
 
 def frequency_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("📬 Daily digest", callback_data="freq_daily"),
-            InlineKeyboardButton("⚡ Real-time", callback_data="freq_realtime"),
-        ],
-        [InlineKeyboardButton("2x per day", callback_data="freq_twice")],
-    ])
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("📬 Daily digest", callback_data="freq_daily"),
+        InlineKeyboardButton("2x per day",      callback_data="freq_twice"),
+    ]])
 
 
 def fit_score_keyboard() -> InlineKeyboardMarkup:
@@ -98,6 +95,33 @@ def fit_score_keyboard() -> InlineKeyboardMarkup:
         InlineKeyboardButton("70%", callback_data="fit_70"),
         InlineKeyboardButton("80%", callback_data="fit_80"),
     ]])
+
+
+TZ_OPTIONS: dict[str, str] = {
+    "tz_pacific":   "America/Vancouver",
+    "tz_mountain":  "America/Denver",
+    "tz_central":   "America/Chicago",
+    "tz_eastern":   "America/New_York",
+    "tz_utc":       "UTC",
+    "tz_london":    "Europe/London",
+    "tz_berlin":    "Europe/Berlin",
+    "tz_india":     "Asia/Kolkata",
+    "tz_singapore": "Asia/Singapore",
+}
+
+
+def timezone_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🌊 Pacific",    callback_data="tz_pacific"),
+         InlineKeyboardButton("🏔 Mountain",   callback_data="tz_mountain")],
+        [InlineKeyboardButton("🌽 Central",    callback_data="tz_central"),
+         InlineKeyboardButton("🗽 Eastern",    callback_data="tz_eastern")],
+        [InlineKeyboardButton("🌐 UTC",        callback_data="tz_utc"),
+         InlineKeyboardButton("🇬🇧 London",   callback_data="tz_london")],
+        [InlineKeyboardButton("🇩🇪 Berlin",   callback_data="tz_berlin"),
+         InlineKeyboardButton("🇮🇳 India",    callback_data="tz_india")],
+        [InlineKeyboardButton("🇸🇬 Singapore", callback_data="tz_singapore")],
+    ])
 
 
 def add_skills_menu_keyboard() -> InlineKeyboardMarkup:

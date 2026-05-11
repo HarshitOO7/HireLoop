@@ -13,7 +13,6 @@ So the ceiling is 3 × 2 × 3 = 18 parallel tasks.
 hours_old is derived from user.notify_freq so we never show stale duplicates:
   twice_daily → 12 h
   daily       → 24 h  (default)
-  realtime    → 6 h
 """
 
 import asyncio
@@ -35,7 +34,7 @@ MAX_LOCATIONS  = 2
 
 def _hours_for_freq(notify_freq: str | None) -> int:
     """Return look-back window in hours based on the user's notify frequency."""
-    return {"twice_daily": 12, "realtime": 6}.get(notify_freq or "daily", 24)
+    return {"twice_daily": 12}.get(notify_freq or "daily", 24)
 
 
 def _dedup_variants(terms: list[str], cap: int) -> list[str]:

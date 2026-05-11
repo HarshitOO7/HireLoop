@@ -19,13 +19,15 @@ class User(Base):
     telegram_id     = Column(String, unique=True, nullable=False)
     name            = Column(String)
     filters         = Column(JSON)          # role, location, salary, remote, blacklist
-    notify_freq          = Column(String, default="daily")   # daily | realtime | twice_daily
+    notify_freq          = Column(String, default="daily")   # daily | twice_daily
     min_fit_score        = Column(Integer, default=60)
     daily_app_limit      = Column(Integer, default=5)
     onboarded            = Column(Boolean, default=False)
     base_resume_markdown = Column(Text)   # raw text extracted from uploaded resume(s)
     resume_facts         = Column(JSON, nullable=True)  # structured facts: education, work dates, projects, certs
     created_at           = Column(DateTime, default=datetime.utcnow)
+    last_active          = Column(DateTime, nullable=True)
+    timezone             = Column(String, default="America/Vancouver")
 
     skill_nodes     = relationship("SkillNode", back_populates="user", cascade="all, delete")
     jobs            = relationship("Job", back_populates="user", cascade="all, delete")

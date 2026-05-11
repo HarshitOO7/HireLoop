@@ -67,6 +67,27 @@ logging.getLogger("JobSpy").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 
+async def _touch_last_active(update: Update, context) -> None:
+    """Update last_active timestamp on every user interaction."""
+    user = update.effective_user
+    if not user:
+        return
+    from datetime import datetime
+    from sqlalchemy import update as sa_update
+    from db.models import User
+    from db.session import AsyncSessionLocal
+    try:
+        async with AsyncSessionLocal() as session:
+            async with session.begin():
+                await session.execute(
+                    sa_update(User)
+                    .where(User.telegram_id == str(user.id))
+                    .values(last_active=datetime.utcnow())
+                )
+    except Exception:
+        pass
+
+
 async def cmd_fetch_now(update: Update, context) -> None:
     """Trigger an immediate scrape for the calling user."""
     from sqlalchemy import select, func
@@ -256,7 +277,7 @@ def main():
         scheduler = build_scheduler(application.bot, ai)
         scheduler.start()
         application.bot_data["scheduler"] = scheduler
-        logger.info("APScheduler started — scrapes at 08:00 and 18:00 daily")
+        logger.info("APScheduler started — hourly tick (Mon–Fri), fires at 08:00 and 18:00 per user timezone")
 
     async def _post_stop(application):
         scheduler = application.bot_data.get("scheduler")
@@ -291,6 +312,9 @@ def main():
                 raise ApplicationHandlerStop
 
         app.add_handler(TypeHandler(Update, auth_gate), group=-1)
+
+    # Touch last_active on every update — group 100 so it runs after real handlers
+    app.add_handler(TypeHandler(Update, _touch_last_active), group=100)
 
     # Register handlers — order matters (ConversationHandlers first)
     app.add_handler(build_onboarding_handler())

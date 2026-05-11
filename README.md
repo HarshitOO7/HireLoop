@@ -39,8 +39,8 @@ Scrape jobs  →  Score fit  →  Verify skills  →  Generate resume  →  You 
 
 | Feature | Status |
 |---|---|
-| Multi-provider AI (Groq, Anthropic, OpenAI, Gemini, Ollama) | ✅ Done |
-| Tiered AI routing (fast for bulk, quality for resumes) | ✅ Done |
+| Multi-provider AI (DeepSeek, Anthropic, Grok, OpenAI, Gemini, Ollama) | ✅ Done |
+| Three-tier AI routing (fast/quality/fallback) + Anthropic prompt caching | ✅ Done |
 | In-memory AI response cache (SHA-256 keyed) | ✅ Done |
 | 6-step Telegram onboarding wizard | ✅ Done |
 | Resume parsing (PDF + DOCX, parallel with asyncio.gather) | ✅ Done |
@@ -53,10 +53,14 @@ Scrape jobs  →  Score fit  →  Verify skills  →  Generate resume  →  You 
 | Job scraping (JobSpy — Indeed, LinkedIn, Glassdoor, Google) | 🧪 Testing |
 | AI role title expansion (cached 24h, 6–8 variants) | ✅ Done |
 | URL-hash dedup + semantic dedup (title + company) | ✅ Done |
+| Company cooldown dedup (≥2 jobs/company in 7 days → skip) | ✅ Done |
 | URL-paste job ingestion (Jina Reader) | ✅ Done |
 | Fit scoring + job notification cards | ✅ Done |
+| Background analysis with completion summary ("N more matched") | ✅ Done |
 | Skill verification dialog (gap skills → evidence → DB) | ✅ Done |
-| APScheduler — daily scrape at 08:00 + 18:00 | ✅ Done |
+| APScheduler — hourly tick (Mon–Fri), fires at 08:00 + 18:00 per user timezone | ✅ Done |
+| Per-user timezone setting (/timezone command) | ✅ Done |
+| Weekday-only inactivity detection (>3 business days → warning) | ✅ Done |
 | /fetchnow — instant on-demand scrape | ✅ Done |
 | Auto-purge stale jobs after 10 days (keeps applied/approved) | ✅ Done |
 | Resume stored as Markdown in DB (render on-demand) | ✅ Done |
@@ -106,17 +110,19 @@ Scrape jobs  →  Score fit  →  Verify skills  →  Generate resume  →  You 
 │                      AI Service Layer                            │
 │  ai/service.py — HireLoopAI                                      │
 │                                                                  │
-│   FAST provider (Groq / llama-3.3-70b)                          │
+│   FAST provider (DeepSeek V3 / deepseek-chat)                    │
 │     parse_resume()  parse_job()  analyze_fit()                   │
 │     expand_role_titles()  ← cached 24h, 6–8 variants            │
 │                                                                  │
-│   QUALITY provider (Anthropic / claude-sonnet-4-6)              │
+│   QUALITY provider (Anthropic / claude-sonnet-4-6 + caching)    │
 │     tailor_resume()  write_cover_letter()                        │
 │     answer_screening_questions()  edit_resume()                  │
 │                                                                  │
+│   FALLBACK provider (Grok 3 Fast — quality backup)              │
+│                                                                  │
 │   ai/cache.py — SHA-256 in-memory cache (no repeat AI calls)    │
 │   ai/factory.py — reads .env, builds provider instances          │
-│   ai/providers/ — Groq · Anthropic · OpenAI · Gemini · Ollama   │
+│   ai/providers/ — DeepSeek · Anthropic · Grok · OpenAI · Groq   │
 └────────────────────────┬────────────────────────────────────────┘
                          │
                          ▼
@@ -177,18 +183,19 @@ The bot will create the database schema on first run. Open Telegram, find your b
 
 ```env
 # ── AI — Fast provider (high volume: parse jobs, score fit) ──────────────────
-AI_FAST_PROVIDER=groq                      # groq | anthropic | openai | gemini | ollama
+AI_FAST_PROVIDER=deepseek                  # deepseek | groq | openai | gemini | ollama
 AI_FAST_API_KEY=your_key
-AI_FAST_MODEL=                             # blank = use provider default (see table below)
+AI_FAST_MODEL=                             # blank = deepseek-chat (DeepSeek V3)
 
 # ── AI — Quality provider (high stakes: resume, cover letter) ────────────────
 AI_QUALITY_PROVIDER=anthropic
 AI_QUALITY_API_KEY=your_key
-AI_QUALITY_MODEL=                          # blank = use provider default
+AI_QUALITY_MODEL=                          # blank = claude-sonnet-4-6
 
-# ── AI global settings ───────────────────────────────────────────────────────
-AI_MAX_TOKENS=4096
-AI_TEMPERATURE=0.3
+# ── AI — Fallback (used when quality provider fails) ─────────────────────────
+AI_FALLBACK_PROVIDER=grok                  # leave blank to disable fallback
+AI_FALLBACK_API_KEY=your_key
+AI_FALLBACK_MODEL=                         # blank = grok-3-fast
 
 # ── Telegram ─────────────────────────────────────────────────────────────────
 TELEGRAM_BOT_TOKEN=from_botfather
@@ -198,19 +205,20 @@ ALLOWED_TELEGRAM_IDS=                      # comma-separated IDs/usernames, blan
 DATABASE_URL=sqlite:///hireloop.db         # swap to postgresql+asyncpg://... for prod
 
 # ── Optional ─────────────────────────────────────────────────────────────────
-SERPAPI_KEY=                               # enables Google Jobs via SerpAPI
 OLLAMA_HOST=http://localhost:11434         # local Ollama instance
 ```
 
 ### Provider Defaults
 
-| Provider | Default Model | Speed | Cost |
-|---|---|---|---|
-| `groq` | `llama-3.3-70b-versatile` | Very fast | Free tier available |
-| `anthropic` | `claude-sonnet-4-6` | Fast | ~$3/M tokens |
-| `openai` | `gpt-4o` | Fast | ~$5/M tokens |
-| `gemini` | `gemini-2.0-flash` | Fast | Free tier available |
-| `ollama` | `llama3.2` | Depends on hardware | Free (local) |
+| Provider | Default Model | Speed | Cost | Role |
+|---|---|---|---|---|
+| `deepseek` | `deepseek-chat` (V3) | Fast | ~$0.14/M input | Fast (default) |
+| `anthropic` | `claude-sonnet-4-6` | Fast | ~$3/M input | Quality (default) |
+| `grok` / `xai` | `grok-3-fast` | Fast | ~$0.20/M input | Fallback (default) |
+| `groq` | `llama-3.3-70b-versatile` | Very fast | Free tier | Legacy fast |
+| `openai` | `gpt-4o` | Fast | ~$2.50/M input | Any slot |
+| `gemini` | `gemini-2.0-flash` | Fast | Free tier | Any slot |
+| `ollama` | `llama3.2` | Hardware | Free (local) | Any slot |
 
 ---
 
@@ -305,6 +313,7 @@ skills       - View your skill graph (HTML report)
 instructions - Set standing instructions applied to every resume
 settings     - View all preferences
 filters      - Edit job filters
+timezone     - Set your timezone for scheduled scrapes
 pause        - Pause or resume job hunting
 deleteskill  - Remove a skill by name
 fetchnow     - Trigger an immediate job scrape
@@ -362,7 +371,7 @@ SET_FILTERS
   └─ Blacklist companies
 
 SET_FREQUENCY
-  └─ [📬 Daily] [⚡ Real-time] [2x/day]
+  └─ [📬 Daily digest] [2x per day]
   └─ Min fit score: [50%] [60%] [70%] [80%]
 
 DONE
@@ -635,6 +644,7 @@ users
   id (UUID PK) · telegram_id · name · filters (JSON) · notify_freq
   min_fit_score · daily_app_limit · onboarded · created_at
   base_resume_markdown · resume_facts (JSON)
+  last_active (DateTime, nullable) · timezone (Text, default "America/Vancouver")
 
 skill_nodes
   id · user_id (FK) · skill_name · status · confidence
@@ -673,10 +683,14 @@ applications
 - [~] Job scraper (JobSpy — Indeed, LinkedIn, Glassdoor, Google) — testing in progress
 - [x] AI role title expansion (expand_role_titles, cached 24h)
 - [x] URL-hash + semantic (title+company) dedup
+- [x] Company cooldown dedup (≥2 jobs/company in 7 days → skip repeat-posting spam)
 - [x] URL-paste ingestion (Jina Reader)
 - [x] Fit scoring notification cards
+- [x] Background analysis with completion summary
 - [x] Skill verification dialog
-- [x] APScheduler daily scrape loop (08:00 + 18:00)
+- [x] APScheduler hourly tick (Mon–Fri), fires at 08:00 + 18:00 per user timezone
+- [x] Per-user timezone setting (/timezone)
+- [x] Weekday-only inactivity detection (>3 business days → auto-pause + warning)
 - [x] /fetchnow — instant on-demand scrape
 - [x] Auto-purge stale jobs after 10 days
 - [x] PDF export (reportlab) — resume/pdf_export.py (render layer ready)

@@ -777,7 +777,7 @@ async def set_years_exp_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def set_frequency(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
-    mapping = {"freq_daily": "daily", "freq_realtime": "realtime", "freq_twice": "twice_daily"}
+    mapping = {"freq_daily": "daily", "freq_twice": "twice_daily"}
     freq = mapping.get(query.data, "daily")
     context.user_data["notify_freq"] = freq
     await query.edit_message_text(f"Notification frequency: {freq}")
