@@ -65,9 +65,9 @@ async def _get_user_profile(user_id: str, session) -> dict:
 
 # ── Job card formatting ──────────────────────────────────────────────────────
 
-def _md(text) -> str:
-    """Escape Telegram MarkdownV1 special chars in user-controlled strings."""
-    return (str(text) if text else "").replace("\\", "\\\\").replace("_", "\\_").replace("*", "\\*").replace("`", "\\`").replace("[", "\\[")
+def _esc(text) -> str:
+    """Escape HTML special chars for Telegram HTML parse mode."""
+    return (str(text) if text else "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def _build_card_text(job: Job, parsed: dict, fit: dict) -> str:
@@ -78,22 +78,22 @@ def _build_card_text(job: Job, parsed: dict, fit: dict) -> str:
     matched = fit.get("matched_skills", [])
     gaps    = fit.get("missing_required", [])
 
-    matched_str = ", ".join(_md(s) for s in matched[:5]) or "—"
-    gap_str     = ", ".join(_md(g.get("skill", "?")) for g in gaps[:4]) if gaps else "None"
+    matched_str = ", ".join(_esc(s) for s in matched[:5]) or "—"
+    gap_str     = ", ".join(_esc(g.get("skill", "?")) for g in gaps[:4]) if gaps else "None"
 
-    salary   = _md(parsed.get("salary_range") or "—")
-    location = _md(parsed.get("location") or "—")
+    salary   = _esc(parsed.get("salary_range") or "—")
+    location = _esc(parsed.get("location") or "—")
 
     text = (
-        f"🏢 *{_md(parsed.get('title') or job.title)}*\n"
-        f"{_md(job.company)} · {location} · {salary}\n\n"
-        f"Fit Score: *{score}%* · {label}\n\n"
+        f"🏢 <b>{_esc(parsed.get('title') or job.title)}</b>\n"
+        f"{_esc(job.company)} · {location} · {salary}\n\n"
+        f"Fit Score: <b>{score}%</b> · {label}\n\n"
         f"✅ Matched: {matched_str}\n"
         f"❓ Gaps: {gap_str}"
     )
     gap_summary = fit.get("gap_summary", "")
     if gap_summary:
-        text += f"\n📝 _{_md(gap_summary)}_"
+        text += f"\n📝 <i>{_esc(gap_summary)}</i>"
     return text
 
 
@@ -239,10 +239,10 @@ async def _analyze_remaining(
             await bot.send_message(
                 chat_id=user.telegram_id,
                 text=(
-                    f"✅ Analysis done — *{n_more} more job{'s' if n_more != 1 else ''}* matched. "
+                    f"✅ Analysis done — <b>{n_more} more job{'s' if n_more != 1 else ''}</b> matched. "
                     f"Tap 📋 Pending Jobs to continue."
                 ),
-                parse_mode="Markdown",
+                parse_mode="HTML",
             )
         else:
             await bot.send_message(
@@ -377,10 +377,10 @@ async def _process_user(user: User, bot, ai, is_manual: bool = False) -> int:
     await bot.send_message(
         chat_id=user.telegram_id,
         text=(
-            f"✅ *{count} match{'es' if count != 1 else ''}* so far{bg_note}!\n\n"
+            f"✅ <b>{count} match{'es' if count != 1 else ''}</b> so far{bg_note}!\n\n"
             f"Act on each card and the next one follows automatically 👇"
         ),
-        parse_mode="Markdown",
+        parse_mode="HTML",
     )
 
     first     = qualifying[0]
@@ -391,7 +391,7 @@ async def _process_user(user: User, bot, ai, is_manual: bool = False) -> int:
     await bot.send_message(
         chat_id=user.telegram_id,
         text=card_text,
-        parse_mode="Markdown",
+        parse_mode="HTML",
         reply_markup=job_card_keyboard(first.id, fallback),
     )
 
@@ -436,7 +436,7 @@ async def send_next_pending_card(telegram_id: str, bot) -> bool:
     await bot.send_message(
         chat_id=telegram_id,
         text=card_text,
-        parse_mode="Markdown",
+        parse_mode="HTML",
         reply_markup=job_card_keyboard(job.id, fallback),
     )
     return True

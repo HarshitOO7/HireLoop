@@ -114,9 +114,9 @@ async def cmd_fetch_now(update: Update, context) -> None:
 
     if pending_count > 0:
         await update.message.reply_text(
-            f"📋 *{pending_count}* pending job{'s' if pending_count != 1 else ''} from before — here's the first one.\n\n"
+            f"📋 <b>{pending_count}</b> pending job{'s' if pending_count != 1 else ''} from before — here's the first one.\n\n"
             f"🔍 Also starting a new search in the background...",
-            parse_mode="Markdown",
+            parse_mode="HTML",
         )
         await send_next_pending_card(tg_id, context.bot)
     else:
@@ -193,7 +193,7 @@ async def _handle_url_paste(update: Update, context, url: str) -> None:
     await msg.delete()
     await update.message.reply_text(
         card_text,
-        parse_mode="Markdown",
+        parse_mode="HTML",
         reply_markup=job_card_keyboard(job.id, job_url),
     )
 
