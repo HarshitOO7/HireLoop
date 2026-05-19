@@ -56,6 +56,8 @@ SCORING RULES:
 - Never return fit_score > 85 unless all required skills are matched
 - If a missing required skill represents the PRIMARY FUNCTION of this role (what the role fundamentally exists to do, not a supporting tool or process), it is a critical gap — fit_score MUST be ≤ 45 and action must be "skip"
 - If missing_required contains ANY other item with importance="required", fit_score MUST be ≤ 65
+- If missing_required is empty, fit_score MUST be ≥ 80
+- Never reduce fit_score for a reason not listed in missing_required — if it matters enough to penalize, add it as a gap (use importance="preferred" or "nice" if not hard-required)
 - gap_summary must be honest — if fit_score < 60, say so plainly
 
 EXPERIENCE / SENIORITY PENALTY:
@@ -374,6 +376,8 @@ SCORING RULES:
 - Never return fit_score > 85 unless all required skills are matched
 - If a missing required skill represents the PRIMARY FUNCTION of this role (what the role fundamentally exists to do, not a supporting tool or process), it is a critical gap — fit_score MUST be ≤ 45 and action must be "skip"
 - If missing_required contains ANY other item with importance="required", fit_score MUST be ≤ 65
+- If missing_required is empty, fit_score MUST be ≥ 80
+- Never reduce fit_score for a reason not listed in missing_required — if it matters enough to penalize, add it as a gap (use importance="preferred" or "nice" if not hard-required)
 - gap_summary must be honest — if fit_score < 60, say so plainly
 
 Return ONLY valid JSON. No preamble, no markdown fences, no explanation."""

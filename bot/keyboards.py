@@ -228,7 +228,8 @@ def post_delivery_keyboard(job_id: str, job_url: str | None) -> InlineKeyboardMa
             InlineKeyboardButton("✅ Looks good — next ➡️", callback_data=f"edit_done_{job_id}"),
         ],
         [
-            InlineKeyboardButton("✏️ Edit resume",  callback_data=f"edit_resume_{job_id}"),
+            InlineKeyboardButton("✏️ Edit resume",   callback_data=f"edit_resume_{job_id}"),
+            InlineKeyboardButton("❓ App Questions", callback_data=f"app_questions_{job_id}"),
         ],
     ]
     bottom = [InlineKeyboardButton("📄 Full JD", callback_data=f"job_fulljd_{job_id}")]

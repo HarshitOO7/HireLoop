@@ -59,6 +59,7 @@ from jobs.scheduler import send_next_pending_card
 logger = logging.getLogger(__name__)
 
 EDIT_AWAITING_REQUEST = 10   # ConversationHandler state
+SCREENING_QUESTIONS   = 11   # waiting for user to paste application questions
 _MAX_EDIT_CHARS       = 600  # one clear edit request — no essays
 
 
@@ -661,6 +662,87 @@ async def app_cl(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await query.message.reply_text("Send failed — try again.")
 
 
+# ── Application screening questions ──────────────────────────────────────────
+
+async def app_questions_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """User tapped ❓ App Questions — ask them to paste the questions."""
+    query = update.callback_query
+    await _safe_answer(query)
+    job_id = query.data.split("app_questions_", 1)[1]
+    context.user_data["screening_job_id"] = job_id
+    await query.message.reply_text(
+        "Paste the application questions, one per line.\n\n"
+        "I'll answer each one using your resume and the job description."
+    )
+    return SCREENING_QUESTIONS
+
+
+async def handle_screening_questions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """User pasted their application questions — generate answers."""
+    from sqlalchemy import select
+    from db.models import SkillEvidence, SkillNode, User
+
+    questions = [q.strip() for q in update.message.text.splitlines() if q.strip()]
+    if not questions:
+        await update.message.reply_text("Didn't catch any questions — paste them one per line and try again.")
+        return SCREENING_QUESTIONS
+
+    job_id = context.user_data.get("screening_job_id")
+    ai     = context.application.bot_data["ai"]
+    tg_id  = str(update.effective_user.id)
+
+    msg = await update.message.reply_text("Generating answers...")
+
+    async with AsyncSessionLocal() as session:
+        user_result = await session.execute(
+            select(User).where(User.telegram_id == tg_id)
+        )
+        user = user_result.scalar_one_or_none()
+        if not user:
+            await msg.edit_text("Profile not found. Run /start first.")
+            return ConversationHandler.END
+
+        job_result = await session.execute(select(Job).where(Job.id == job_id))
+        job = job_result.scalar_one_or_none()
+
+        nodes = (await session.execute(
+            select(SkillNode).where(SkillNode.user_id == user.id)
+        )).scalars().all()
+
+        evidence = (await session.execute(
+            select(SkillEvidence).where(
+                SkillEvidence.skill_node_id.in_([n.id for n in nodes])
+            )
+        )).scalars().all()
+
+    user_profile = {
+        "name": user.name or "",
+        "skills": [{"skill_name": n.skill_name, "status": n.status} for n in nodes],
+        "work_history": [
+            {"company": e.company, "role_title": e.role_title, "duration_months": e.duration_months}
+            for e in evidence if e.company
+        ],
+    }
+
+    try:
+        answers = await ai.answer_screening_questions(
+            questions, job.parsed or {} if job else {}, user_profile
+        )
+    except Exception as e:
+        logger.error("[screening_questions] AI error: %s", e)
+        await msg.edit_text("AI error — try again in a moment.")
+        return ConversationHandler.END
+
+    lines = []
+    for item in answers:
+        lines.append(f"<b>Q: {item.get('question', '')}</b>")
+        lines.append(f"{item.get('answer', '')}")
+        lines.append("")
+    await msg.delete()
+    await update.message.reply_text("\n".join(lines).strip(), parse_mode="HTML")
+    return ConversationHandler.END
+
+
 # ── Handler builders ──────────────────────────────────────────────────────────
 
 def get_job_approval_handlers() -> list:
@@ -671,6 +753,7 @@ def get_job_approval_handlers() -> list:
         CallbackQueryHandler(deliver_pdf,         pattern=r"^deliver_pdf_"),
         CallbackQueryHandler(deliver_both,        pattern=r"^deliver_both_"),
         CallbackQueryHandler(edit_done,           pattern=r"^edit_done_"),
+        CallbackQueryHandler(app_questions_start, pattern=r"^app_questions_"),
         # app history re-downloads
         CallbackQueryHandler(app_docx,            pattern=r"^app_docx_"),
         CallbackQueryHandler(app_pdf,             pattern=r"^app_pdf_"),
@@ -679,10 +762,11 @@ def get_job_approval_handlers() -> list:
 
 
 def build_resume_edit_handler() -> ConversationHandler:
-    """ConversationHandler for the post-delivery edit loop."""
+    """ConversationHandler for the post-delivery edit loop and screening questions."""
     return ConversationHandler(
         entry_points=[
-            CallbackQueryHandler(edit_resume_start, pattern=r"^edit_resume_"),
+            CallbackQueryHandler(edit_resume_start,   pattern=r"^edit_resume_"),
+            CallbackQueryHandler(app_questions_start, pattern=r"^app_questions_"),
         ],
         states={
             EDIT_AWAITING_REQUEST: [
@@ -691,6 +775,9 @@ def build_resume_edit_handler() -> ConversationHandler:
                 CallbackQueryHandler(save_globally_dates, pattern=r"^save_global_dates_"),
                 CallbackQueryHandler(save_globally_all,   pattern=r"^save_global_all_"),
                 CallbackQueryHandler(save_globally_skip,  pattern=r"^save_global_skip_"),
+            ],
+            SCREENING_QUESTIONS: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_screening_questions),
             ],
         },
         fallbacks=[],
