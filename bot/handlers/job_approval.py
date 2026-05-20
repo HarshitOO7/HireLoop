@@ -735,8 +735,11 @@ async def handle_screening_questions(update: Update, context: ContextTypes.DEFAU
 
     lines = []
     for item in answers:
-        lines.append(f"<b>Q: {item.get('question', '')}</b>")
-        lines.append(f"{item.get('answer', '')}")
+        if isinstance(item, dict):
+            lines.append(f"<b>Q: {item.get('question', '')}</b>")
+            lines.append(f"{item.get('answer', '')}")
+        else:
+            lines.append(str(item))
         lines.append("")
     await msg.delete()
     await update.message.reply_text("\n".join(lines).strip(), parse_mode="HTML")
