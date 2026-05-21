@@ -13,6 +13,7 @@ from datetime import datetime
 
 from sqlalchemy import select
 from telegram import Update
+from bot.security import guard_input
 from telegram.ext import (
     CallbackQueryHandler,
     CommandHandler,
@@ -382,7 +383,7 @@ async def add_skill_removed(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 # ── Path B: manual entry ─────────────────────────────────────────────────────
 
 async def handle_manual_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    name = update.message.text.strip()
+    name = guard_input(update.message.text.strip(), 100, "skill_name")
     if not name:
         await update.message.reply_text("Please type a skill name.")
         return ADD_MANUAL_NAME
@@ -401,7 +402,7 @@ async def handle_manual_ctx(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     tg_id = str(update.effective_user.id)
     name = context.user_data["add_manual_skill_name"]
     text = update.message.text.strip()
-    user_context = "" if text.lower() == "skip" else text
+    user_context = "" if text.lower() == "skip" else guard_input(text, 400, "skill_context")
 
     skill = {
         "skill_name": name,

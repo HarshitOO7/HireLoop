@@ -426,7 +426,9 @@ Return this exact JSON structure:
 
 Return ONLY the JSON object. No text before or after the closing brace."""
 
-_SCREENING_SYSTEM = "Answer screening questions honestly based on the candidate's verified experience."
+_SCREENING_SYSTEM = """You answer job application screening questions using only verified candidate experience.
+Write each answer in first person, 2-4 sentences, honest and specific.
+Return ONLY valid JSON — no preamble, no markdown fences."""
 
 _SCREENING_PROMPT = """Answer these screening questions for a job application.
 
@@ -442,7 +444,8 @@ _SCREENING_PROMPT = """Answer these screening questions for a job application.
 {user_profile_json}
 </candidate>
 
-Return a JSON array: [{{"question": <string>, "answer": <string>}}]
+Return a JSON array where each element matches one question in order:
+[{{"question": "exact question text", "answer": "your 2-4 sentence answer"}}]
 
 Return ONLY the JSON array. No text before or after the closing bracket."""
 
@@ -839,7 +842,7 @@ class HireLoopAI:
         logger.info("[answer_screening] sending to %s (quality) — prompt %d chars",
                     self._quality.provider_name, len(prompt))
         t_ai = time.monotonic()
-        raw = await self._quality_complete_json(prompt, system=_SCREENING_SYSTEM, max_tokens=600)
+        raw = await self._quality_complete_json(prompt, system=_SCREENING_SYSTEM, max_tokens=2000)
         logger.info("[answer_screening] AI responded in %.2fs — raw %d chars", time.monotonic() - t_ai, len(raw))
         result = _parse_json(raw)
         logger.info("[answer_screening] DONE %.2fs — answered %d questions", time.monotonic() - t0, len(result))

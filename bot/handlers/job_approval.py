@@ -27,6 +27,7 @@ My Applications:
   app_docx_{app_id} / app_pdf_{app_id} / app_cl_{app_id} → re-send files
 """
 
+import html
 import io
 import logging
 import tempfile
@@ -52,6 +53,7 @@ from bot.keyboards import (
     resume_delivery_keyboard,
     save_globally_keyboard,
 )
+from bot.security import check_rate_limit, contains_injection, guard_input
 from db.models import Application, Job
 from db.session import AsyncSessionLocal
 from jobs.scheduler import send_next_pending_card
@@ -682,14 +684,33 @@ async def handle_screening_questions(update: Update, context: ContextTypes.DEFAU
     from sqlalchemy import select
     from db.models import SkillEvidence, SkillNode, User
 
-    questions = [q.strip() for q in update.message.text.splitlines() if q.strip()]
+    raw_text = update.message.text.strip()
+    tg_id    = str(update.effective_user.id)
+
+    # Security: injection check
+    if contains_injection(raw_text):
+        await update.message.reply_text(
+            "That doesn't look like a valid question — please paste your application questions only."
+        )
+        return SCREENING_QUESTIONS
+
+    # Security: rate limit (5 AI calls/day per user)
+    if not check_rate_limit(context.application.bot_data, tg_id, "screen_q", 5):
+        await update.message.reply_text(
+            "You've reached the daily limit for application question answers (5/day). Try again tomorrow."
+        )
+        return ConversationHandler.END
+
+    # Security: cap total input
+    raw_text = guard_input(raw_text, 3000, "screening_questions")
+
+    questions = [q.strip() for q in raw_text.splitlines() if q.strip()][:20]
     if not questions:
         await update.message.reply_text("Didn't catch any questions — paste them one per line and try again.")
         return SCREENING_QUESTIONS
 
     job_id = context.user_data.get("screening_job_id")
     ai     = context.application.bot_data["ai"]
-    tg_id  = str(update.effective_user.id)
 
     msg = await update.message.reply_text("Generating answers...")
 
@@ -733,14 +754,26 @@ async def handle_screening_questions(update: Update, context: ContextTypes.DEFAU
         await msg.edit_text("AI error — try again in a moment.")
         return ConversationHandler.END
 
+    # Normalise result — AI may return a list of dicts or a plain dict
+    if isinstance(answers, dict):
+        answers = [answers]
+    if not isinstance(answers, list):
+        answers = []
+
     lines = []
-    for item in answers:
-        if isinstance(item, dict):
-            lines.append(f"<b>Q: {item.get('question', '')}</b>")
-            lines.append(f"{item.get('answer', '')}")
-        else:
-            lines.append(str(item))
+    for i, item in enumerate(answers):
+        if not isinstance(item, dict):
+            continue
+        q_text = html.escape(str(item.get("question", questions[i] if i < len(questions) else "")))
+        a_text = html.escape(str(item.get("answer", "")))
+        lines.append(f"<b>{q_text}</b>")
+        lines.append(a_text)
         lines.append("")
+
+    if not lines:
+        await msg.edit_text("Couldn't generate answers — try again.")
+        return ConversationHandler.END
+
     await msg.delete()
     await update.message.reply_text("\n".join(lines).strip(), parse_mode="HTML")
     return ConversationHandler.END

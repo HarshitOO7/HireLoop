@@ -43,6 +43,7 @@ from bot.handlers.job_approval import (
     cmd_my_applications,
 )
 from bot.keyboards import MAIN_KEYBOARD
+from bot.security import check_rate_limit, guard_input
 from db.models import Base
 from db.session import engine
 from jobs.scheduler import build_scheduler, run_scrape_cycle, _get_user_profile, _build_card_text, send_next_pending_card
@@ -138,6 +139,12 @@ async def _handle_url_paste(update: Update, context, url: str) -> None:
 
     tg_id = str(update.effective_user.id)
     ai = context.application.bot_data["ai"]
+
+    # Rate limit: 10 URL analyses per user per day
+    if not check_rate_limit(context.application.bot_data, tg_id, "url_paste", 10):
+        await update.message.reply_text("Daily URL analysis limit reached (10/day). Try again tomorrow.")
+        return
+
     msg = await update.message.reply_text("Fetching job details from that link...")
 
     try:
@@ -147,6 +154,8 @@ async def _handle_url_paste(update: Update, context, url: str) -> None:
         await msg.edit_text("Couldn't fetch that link. Make sure it's a public job posting URL.")
         return
 
+    # Truncate before sending to AI — external content may be huge
+    jd_text = guard_input(jd_text, 15_000, "url_jd")
     await msg.edit_text("Got it! Analyzing fit...")
 
     async with AsyncSessionLocal() as session:
