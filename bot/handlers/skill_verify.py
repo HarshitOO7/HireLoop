@@ -350,6 +350,36 @@ async def job_skip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await _do_skip_job(query, job_id, str(update.effective_user.id), context.bot)
 
 
+async def job_save(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles job_save_{id} — saves job for later without generating a resume."""
+    from sqlalchemy import select
+    from jobs.scheduler import send_next_pending_card
+
+    query  = update.callback_query
+    await _safe_answer(query)
+    job_id = query.data.split("job_save_", 1)[1]
+
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            result = await session.execute(select(Job).where(Job.id == job_id))
+            job = result.scalar_one_or_none()
+            if job:
+                job.status = "saved"
+
+    await query.edit_message_text("💾 Saved — JD stored for later.")
+    await send_next_pending_card(str(update.effective_user.id), context.bot)
+
+
+async def job_apply_later(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles job_later_{id} — keeps job in pending (back of queue), moves on."""
+    from jobs.scheduler import send_next_pending_card
+
+    query  = update.callback_query
+    await _safe_answer(query)
+    await query.edit_message_text("🕐 Saved for later — still in your queue.")
+    await send_next_pending_card(str(update.effective_user.id), context.bot)
+
+
 async def job_skip_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles skip_job_{id} from resume delivery / approval keyboards."""
     query  = update.callback_query
@@ -462,6 +492,8 @@ def get_job_card_handlers() -> list:
         CallbackQueryHandler(job_skip_delivery,   pattern=r"^skip_job_"),
         CallbackQueryHandler(job_full_jd,         pattern=r"^job_fulljd_"),
         CallbackQueryHandler(job_generate_anyway, pattern=r"^job_generate_"),
+        CallbackQueryHandler(job_save,            pattern=r"^job_save_"),
+        CallbackQueryHandler(job_apply_later,     pattern=r"^job_later_"),
     ]
 
 

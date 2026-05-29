@@ -168,6 +168,10 @@ def job_card_keyboard(job_id: str, job_url: str) -> InlineKeyboardMarkup:
             InlineKeyboardButton("➡️ Generate Anyway", callback_data=f"job_generate_{job_id}"),
         ],
         [
+            InlineKeyboardButton("💾 Save JD",          callback_data=f"job_save_{job_id}"),
+            InlineKeyboardButton("🕐 Apply Later",      callback_data=f"job_later_{job_id}"),
+        ],
+        [
             InlineKeyboardButton("📄 Full JD",          callback_data=f"job_fulljd_{job_id}"),
             InlineKeyboardButton("🔗 Open Link",        url=job_url),
         ],
