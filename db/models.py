@@ -82,8 +82,9 @@ class Job(Base):
     cover_letter_required = Column(Boolean, default=False)
     recruiter_name        = Column(String)      # Phase 2
     recruiter_linkedin    = Column(String)      # Phase 2
-    # pending | skill_verify | approved | skipped | applied
+    # pending | skill_verify | approved | skipped | applied | saved
     status                = Column(String, default="pending")
+    apply_later_at        = Column(DateTime, nullable=True)
     created_at            = Column(DateTime, default=datetime.utcnow)
 
     user                  = relationship("User", back_populates="jobs")

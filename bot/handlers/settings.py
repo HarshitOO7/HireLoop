@@ -15,6 +15,7 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
+from bot.conversation_utils import TEXT_INPUT, escape_fallbacks
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
@@ -406,18 +407,20 @@ async def _handle_instructions_input(update: Update, context: ContextTypes.DEFAU
     return ConversationHandler.END
 
 
+async def _cancel_instructions(update, context) -> int:
+    await update.message.reply_text("Cancelled.", reply_markup=MAIN_KEYBOARD)
+    return ConversationHandler.END
+
+
 def build_instructions_handler() -> ConversationHandler:
     return ConversationHandler(
         entry_points=[CommandHandler("instructions", cmd_instructions)],
         states={
             _INSTRUCTIONS_INPUT: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, _handle_instructions_input),
+                MessageHandler(TEXT_INPUT, _handle_instructions_input),
             ],
         },
-        fallbacks=[CommandHandler("cancel", lambda u, c: (
-            u.message.reply_text("Cancelled.", reply_markup=MAIN_KEYBOARD)
-            or ConversationHandler.END
-        ))],
+        fallbacks=escape_fallbacks(_cancel_instructions),
         allow_reentry=True,
     )
 

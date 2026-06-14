@@ -35,6 +35,7 @@ from telegram.ext import (
     filters,
 )
 
+from bot.conversation_utils import TEXT_INPUT, escape_fallbacks
 from bot.keyboards import (
     MAIN_KEYBOARD,
     _ALL_SITES,
@@ -870,17 +871,17 @@ def build_onboarding_handler() -> ConversationHandler:
                 CallbackQueryHandler(skill_back,              pattern=r"^skill_back_\d+$"),
             ],
             CONFIRM_SKILL_CONTEXT: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_skill_context),
+                MessageHandler(TEXT_INPUT, handle_skill_context),
             ],
             SET_FILTERS_ROLE: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, set_filters_role),
+                MessageHandler(TEXT_INPUT, set_filters_role),
             ],
             SET_FILTERS_LOCATION: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, set_filters_location),
+                MessageHandler(TEXT_INPUT, set_filters_location),
                 CallbackQueryHandler(done_locations, pattern="done_locations"),
             ],
             SET_FILTERS_COUNTRY: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, set_filters_country),
+                MessageHandler(TEXT_INPUT, set_filters_country),
                 CallbackQueryHandler(skip_country, pattern="skip_country"),
             ],
             SET_FILTERS_REMOTE: [
@@ -891,16 +892,16 @@ def build_onboarding_handler() -> ConversationHandler:
                 CallbackQueryHandler(sites_done,   pattern="^sites_done$"),
             ],
             SET_FILTERS_SALARY: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, set_filters_salary),
+                MessageHandler(TEXT_INPUT, set_filters_salary),
                 CallbackQueryHandler(skip_salary, pattern="skip_salary"),
             ],
             SET_FILTERS_BLACKLIST: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, set_filters_blacklist),
+                MessageHandler(TEXT_INPUT, set_filters_blacklist),
                 CallbackQueryHandler(skip_blacklist, pattern="skip_blacklist"),
             ],
             SET_YEARS_EXP: [
                 CallbackQueryHandler(set_years_exp_button, pattern=r"^yrs_"),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, set_years_exp_text),
+                MessageHandler(TEXT_INPUT, set_years_exp_text),
             ],
             SET_FREQUENCY: [
                 CallbackQueryHandler(set_frequency, pattern=r"^freq_"),
@@ -909,6 +910,6 @@ def build_onboarding_handler() -> ConversationHandler:
                 CallbackQueryHandler(set_fit_score, pattern=r"^fit_"),
             ],
         },
-        fallbacks=[CommandHandler("cancel", cancel)],
+        fallbacks=escape_fallbacks(cancel),
         allow_reentry=True,
     )

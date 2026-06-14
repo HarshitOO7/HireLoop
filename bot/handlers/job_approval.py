@@ -30,6 +30,7 @@ My Applications:
 import html
 import io
 import logging
+import re
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -45,6 +46,8 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
+
+from bot.conversation_utils import TEXT_INPUT, escape_fallbacks
 
 from bot.keyboards import (
     application_card_keyboard,
@@ -62,6 +65,8 @@ logger = logging.getLogger(__name__)
 
 EDIT_AWAITING_REQUEST = 10   # ConversationHandler state
 SCREENING_QUESTIONS   = 11   # waiting for user to paste application questions
+MYAPPS_PICK           = 20   # waiting for user to type a number in /myapps
+SAVED_PICK            = 21   # waiting for user to type a number in /saved
 _MAX_EDIT_CHARS       = 600  # one clear edit request — no essays
 
 
@@ -564,8 +569,8 @@ async def _do_save_globally(context, include_roles: bool) -> None:
 
 # ── My Applications ───────────────────────────────────────────────────────────
 
-async def cmd_my_applications(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Show last 10 applications with re-download buttons."""
+async def cmd_my_applications(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Single-message list of last 10 applications. Enters MYAPPS_PICK state."""
     from sqlalchemy import select
     from db.models import User
 
@@ -578,7 +583,7 @@ async def cmd_my_applications(update: Update, context: ContextTypes.DEFAULT_TYPE
         user = user_result.scalar_one_or_none()
         if not user:
             await update.message.reply_text("Run /start first to set up your profile.")
-            return
+            return ConversationHandler.END
 
         apps_result = await session.execute(
             select(Application, Job)
@@ -593,27 +598,223 @@ async def cmd_my_applications(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(
             "No applications yet — generate your first resume from a pending job card."
         )
-        return
+        return ConversationHandler.END
 
+    context.user_data["myapps_rows"] = [
+        {"app_id": app.id, "job_id": job.id, "has_cl": bool(app.cover_letter_markdown)}
+        for app, job in rows
+    ]
+
+    lines = [f"📁 Applications ({len(rows)})\n"]
+    for i, (app, job) in enumerate(rows, 1):
+        fit_score = int(job.fit_score or (job.parsed or {}).get("_fit", {}).get("fit_score", 0) or 0)
+        date_str  = f"{app.applied_at.strftime('%b')} {app.applied_at.day}" if app.applied_at else "—"
+        lines.append(f"{i}. {job.title or '?'} @ {job.company or '?'} — {date_str} · {fit_score}%")
+
+    lines += [
+        "",
+        "Type a number to get files.",
+        "  1   → Word (.docx)",
+        "  1p  → PDF",
+        "  1c  → Cover letter (if available)",
+        "  1j  → Full Job Description",
+        "",
+        "/cancel to exit.",
+    ]
+    await update.message.reply_text("\n".join(lines))
+    return MYAPPS_PICK
+
+
+async def myapps_pick_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """User typed a number (optionally + suffix) to get a file from /myapps."""
+    text = update.message.text.strip().lower()
+    rows = context.user_data.get("myapps_rows", [])
+    n    = len(rows)
+
+    m = re.match(r'^(\d+)([a-z]?)$', text)
+    if not m:
+        await update.message.reply_text(
+            f"Type a number from 1 to {n} (e.g. 1, 2p, 3c, 4j). /cancel to exit."
+        )
+        return MYAPPS_PICK
+
+    idx = int(m.group(1)) - 1
+    fmt = m.group(2) or "d"
+
+    if idx < 0 or idx >= n:
+        await update.message.reply_text(f"Only 1–{n} are valid. /cancel to exit.")
+        return MYAPPS_PICK
+
+    row    = rows[idx]
+    app    = await _load_app_by_id(row["app_id"])
+    job    = await _load_job(row["job_id"])
+
+    if not app:
+        await update.message.reply_text("Application not found.")
+        return ConversationHandler.END
+
+    chat_id = update.message.chat_id
+
+    if fmt in ("", "d"):
+        if not app.resume_markdown:
+            await update.message.reply_text("Resume not found.")
+            return ConversationHandler.END
+        try:
+            await _send_docx(chat_id, job, app, context.bot)
+        except Exception as e:
+            logger.error("[myapps] docx failed: %s", e)
+            await update.message.reply_text("Send failed — try again.")
+
+    elif fmt == "p":
+        if not app.resume_markdown:
+            await update.message.reply_text("Resume not found.")
+            return ConversationHandler.END
+        try:
+            await _send_pdf(chat_id, job, app, context.bot)
+        except Exception as e:
+            logger.error("[myapps] pdf failed: %s", e)
+            await update.message.reply_text("Send failed — try again.")
+
+    elif fmt == "c":
+        if not row["has_cl"] or not app.cover_letter_markdown:
+            await update.message.reply_text("No cover letter was generated for this application.")
+            return MYAPPS_PICK
+        try:
+            await _send_cover_letter(chat_id, job, app, context.bot)
+        except Exception as e:
+            logger.error("[myapps] cl failed: %s", e)
+            await update.message.reply_text("Send failed — try again.")
+
+    elif fmt == "j":
+        raw_jd = job.raw_jd if job else None
+        if not raw_jd:
+            await update.message.reply_text("No JD was saved for this application.")
+            return MYAPPS_PICK
+        jd_text = raw_jd[:4000] + ("…[truncated]" if len(raw_jd) > 4000 else "")
+        link = f"\n\n🔗 {job.url}" if (job and job.url) else ""
+        await update.message.reply_text(
+            f"📄 {job.title} @ {job.company}\n\n{jd_text}{link}"
+        )
+        return MYAPPS_PICK
+
+    else:
+        await update.message.reply_text(
+            f"Unknown suffix '{fmt}'. Use: 1 (Word), 1p (PDF), 1c (Cover letter), 1j (JD)."
+        )
+        return MYAPPS_PICK
+
+    return ConversationHandler.END
+
+
+# ── Saved Jobs ────────────────────────────────────────────────────────────────
+
+async def cmd_saved_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Single-message list of saved jobs. Enters SAVED_PICK state."""
+    from sqlalchemy import select
+    from db.models import User
+
+    tg_id = str(update.effective_user.id)
+
+    async with AsyncSessionLocal() as session:
+        user_result = await session.execute(
+            select(User).where(User.telegram_id == tg_id)
+        )
+        user = user_result.scalar_one_or_none()
+        if not user:
+            await update.message.reply_text("Run /start first to set up your profile.")
+            return ConversationHandler.END
+
+        jobs_result = await session.execute(
+            select(Job)
+            .where(Job.user_id == user.id, Job.status == "saved")
+            .order_by(Job.fit_score.desc().nullslast(), Job.created_at.desc())
+            .limit(10)
+        )
+        jobs = jobs_result.scalars().all()
+
+    if not jobs:
+        await update.message.reply_text(
+            "No saved jobs yet — tap 💾 Save JD on any job card to bookmark it."
+        )
+        return ConversationHandler.END
+
+    context.user_data["saved_jobs"] = [job.id for job in jobs]
+
+    lines = [f"💾 Saved Jobs ({len(jobs)})\n"]
+    for i, job in enumerate(jobs, 1):
+        fit_score = int(job.fit_score or 0)
+        date_str  = f"{job.created_at.strftime('%b')} {job.created_at.day}" if job.created_at else "—"
+        lines.append(f"{i}. {job.title or '?'} @ {job.company or '?'} · {fit_score}% fit · {date_str}")
+
+    lines += [
+        "",
+        "Type a number to see the full JD.",
+        "Type  Nr  (e.g. 1r) to generate a resume for that job.",
+        "",
+        "/cancel to exit.",
+    ]
+    await update.message.reply_text("\n".join(lines))
+    return SAVED_PICK
+
+
+async def saved_pick_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """User typed a number (optionally + 'r') in /saved."""
+    text      = update.message.text.strip().lower()
+    job_ids   = context.user_data.get("saved_jobs", [])
+    n         = len(job_ids)
+
+    m = re.match(r'^(\d+)(r?)$', text)
+    if not m:
+        await update.message.reply_text(
+            f"Type a number from 1 to {n}, or Nr to generate a resume (e.g. 1, 2r). /cancel to exit."
+        )
+        return SAVED_PICK
+
+    idx    = int(m.group(1)) - 1
+    resume = m.group(2) == "r"
+
+    if idx < 0 or idx >= n:
+        await update.message.reply_text(f"Only 1–{n} are valid. /cancel to exit.")
+        return SAVED_PICK
+
+    job_id = job_ids[idx]
+    job    = await _load_job(job_id)
+
+    if not job:
+        await update.message.reply_text("Job not found.")
+        return ConversationHandler.END
+
+    if resume:
+        from sqlalchemy import select
+        from db.models import User
+
+        tg_id = str(update.effective_user.id)
+        async with AsyncSessionLocal() as session:
+            async with session.begin():
+                job_row = await session.get(Job, job_id)
+                if job_row:
+                    job_row.status = "pending"
+            u = await session.execute(select(User).where(User.telegram_id == tg_id))
+            user_obj = u.scalar_one_or_none()
+
+        user_id = user_obj.id if user_obj else None
+        ai      = context.application.bot_data.get("ai")
+        await update.message.reply_text(f"Starting resume for {job.title} @ {job.company}...")
+        await start_resume_generation(job_id, user_id, update.message, ai)
+        return ConversationHandler.END
+
+    # Default: send full JD
+    raw_jd = job.raw_jd
+    if not raw_jd:
+        await update.message.reply_text("No JD was saved for this job.")
+        return SAVED_PICK
+
+    jd_text = raw_jd[:4000] + ("…[truncated]" if len(raw_jd) > 4000 else "")
+    link    = f"\n\n🔗 {job.url}" if job.url else ""
     await update.message.reply_text(
-        f"📁 *Your last {len(rows)} application{'s' if len(rows) != 1 else ''}:*",
-        parse_mode="Markdown",
+        f"📄 {job.title} @ {job.company}\n\n{jd_text}{link}"
     )
-
-    for app, job in rows:
-        fit_score = job.fit_score or (job.parsed or {}).get("_fit", {}).get("fit_score", 0)
-        applied_str = app.applied_at.strftime("%b %d, %Y") if app.applied_at else "—"
-        text = (
-            f"📄 *{_md(job.title)}* @ {_md(job.company)}\n"
-            f"Applied: {applied_str}  |  Fit: {int(fit_score or 0)}%"
-        )
-        kb = application_card_keyboard(
-            app_id=app.id,
-            job_id=job.id,
-            job_url=job.url,
-            has_cl=bool(app.cover_letter_markdown),
-        )
-        await update.message.reply_text(text, parse_mode="Markdown", reply_markup=kb)
+    return SAVED_PICK
 
 
 async def app_docx(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -806,22 +1007,55 @@ def build_resume_edit_handler() -> ConversationHandler:
         ],
         states={
             EDIT_AWAITING_REQUEST: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, edit_resume_apply),
+                MessageHandler(TEXT_INPUT, edit_resume_apply),
                 # Save globally callbacks (appear mid-conversation after a patch)
                 CallbackQueryHandler(save_globally_dates, pattern=r"^save_global_dates_"),
                 CallbackQueryHandler(save_globally_all,   pattern=r"^save_global_all_"),
                 CallbackQueryHandler(save_globally_skip,  pattern=r"^save_global_skip_"),
             ],
             SCREENING_QUESTIONS: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_screening_questions),
+                MessageHandler(TEXT_INPUT, handle_screening_questions),
             ],
         },
-        fallbacks=[],
+        fallbacks=escape_fallbacks(),
         allow_reentry=True,
     )
 
 
-def get_my_applications_handlers() -> list:
-    return [
-        CommandHandler("myapps", cmd_my_applications),
-    ]
+async def _cancel_picker(update, context) -> int:
+    await update.message.reply_text("Done.")
+    return ConversationHandler.END
+
+
+def build_myapps_handler() -> ConversationHandler:
+    """ConversationHandler for /myapps — single list message, text-based item selection."""
+    return ConversationHandler(
+        entry_points=[
+            CommandHandler("myapps", cmd_my_applications),
+            MessageHandler(filters.Regex(r"^📁 My Apps$"), cmd_my_applications),
+        ],
+        states={
+            MYAPPS_PICK: [MessageHandler(TEXT_INPUT, myapps_pick_handler)],
+        },
+        fallbacks=escape_fallbacks(_cancel_picker),
+        allow_reentry=True,
+        per_user=True,
+        per_chat=True,
+    )
+
+
+def build_saved_handler() -> ConversationHandler:
+    """ConversationHandler for /saved — single list message, text-based item selection."""
+    return ConversationHandler(
+        entry_points=[
+            CommandHandler("saved", cmd_saved_jobs),
+            MessageHandler(filters.Regex(r"^💾 Saved Jobs$"), cmd_saved_jobs),
+        ],
+        states={
+            SAVED_PICK: [MessageHandler(TEXT_INPUT, saved_pick_handler)],
+        },
+        fallbacks=escape_fallbacks(_cancel_picker),
+        allow_reentry=True,
+        per_user=True,
+        per_chat=True,
+    )

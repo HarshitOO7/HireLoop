@@ -23,6 +23,7 @@ from telegram.ext import (
     filters,
 )
 
+from bot.conversation_utils import TEXT_INPUT, escape_fallbacks
 from bot.keyboards import (
     MAIN_KEYBOARD,
     add_skill_confirm_keyboard,
@@ -448,15 +449,15 @@ def build_add_skills_handler() -> ConversationHandler:
                 CallbackQueryHandler(add_skill_removed,           pattern=r"^add_remove_\d+$"),
             ],
             ADD_CONTEXT: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_add_skill_context),
+                MessageHandler(TEXT_INPUT, handle_add_skill_context),
             ],
             ADD_MANUAL_NAME: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_manual_name),
+                MessageHandler(TEXT_INPUT, handle_manual_name),
             ],
             ADD_MANUAL_CTX: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_manual_ctx),
+                MessageHandler(TEXT_INPUT, handle_manual_ctx),
             ],
         },
-        fallbacks=[CommandHandler("cancel", cancel_add)],
+        fallbacks=escape_fallbacks(cancel_add),
         allow_reentry=True,
     )

@@ -417,7 +417,7 @@ async def send_next_pending_card(telegram_id: str, bot) -> bool:
         job_result = await session.execute(
             select(Job)
             .where(Job.user_id == user.id, Job.status == "pending")
-            .order_by(Job.fit_score.desc(), Job.created_at.asc())
+            .order_by(Job.apply_later_at.asc().nullsfirst(), Job.fit_score.desc(), Job.created_at.asc())
             .limit(1)
         )
         job = job_result.scalar_one_or_none()

@@ -1,6 +1,4 @@
 # HireLoop — Claude Code Context
-# Drop this file as CLAUDE.md in your project root.
-# Claude Code reads it automatically on every session.
 
 ---
 
@@ -17,471 +15,91 @@ HireLoop — a human-in-the-loop autonomous job hunting agent.
 
 ---
 
-## Project Structure
-
-```
-hireloop/
-├── CLAUDE.md
-├── .env.example
-├── .env                           # gitignored
-├── .gitignore
-├── requirements.txt
-├── docker-compose.yml
-│
-├── ai/                            # AI provider abstraction layer
-│   ├── base.py                    # Abstract AIProvider class
-│   ├── factory.py                 # AIFactory.create_fast() / create_quality()
-│   ├── service.py                 # HireLoopAI — all 6 agent tasks (tiered)
-│   ├── __init__.py
-│   └── providers/
-│       ├── anthropic_provider.py
-│       ├── openai_provider.py
-│       ├── gemini_provider.py
-│       ├── groq_provider.py       # Legacy fast provider (replaced by deepseek)
-│       ├── ollama_provider.py     # Local free option
-│       └── __init__.py
-│
-├── alembic/
-│   ├── env.py
-│   └── versions/                  # Migration files
-│
-├── db/
-│   ├── models.py                  # SQLAlchemy — skill graph schema
-│   └── session.py
-│
-├── bot/
-│   ├── main.py
-│   ├── onboarding.py              # 6-step Telegram wizard
-│   ├── keyboards.py               # All InlineKeyboardMarkup builders
-│   └── handlers/
-│       ├── resume_upload.py
-│       ├── skill_verify.py
-│       ├── job_approval.py
-│       └── settings.py
-│
-├── jobs/
-│   ├── scraper.py                 # JobSpy wrapper
-│   ├── glassdoor_patch.py         # curl_cffi patch — Canadian IP geo-redirect + Cloudflare 403
-│   ├── parser.py                  # Jina Reader for pasted URLs
-│   ├── filters.py
-│   └── scheduler.py               # APScheduler — embedded in bot process
-│
-├── resume/
-│   ├── generator.py               # tailor_resume() → store Markdown TEXT in DB
-│   ├── section_order.py           # infer section order from profile (zero tokens, pure Python)
-│   ├── docx_export.py             # Markdown → .docx via python-docx (ATS-safe, primary)
-│   ├── pdf_export.py              # Markdown → PDF via reportlab (on-request) ✅
-│   ├── variants/                  # base resume markdown files
-│   └── output/                    # generated files (gitignored)
-│
-├── tests/
-└── scripts/
-    ├── test_provider.py           # AI provider smoke test
-    └── run_scrape.py              # Standalone scrape — full pipeline without the bot
-```
-
----
-
 ## Environment Variables
 
 ```env
-# Fast provider — cheap/fast — used for scraping + fit scoring (high volume)
 AI_FAST_PROVIDER=deepseek
 AI_FAST_API_KEY=your_deepseek_key
 AI_FAST_MODEL=                          # blank = deepseek-chat (DeepSeek V3)
 
-# Quality provider — best model — used for resume + cover letter generation
 AI_QUALITY_PROVIDER=anthropic
 AI_QUALITY_API_KEY=your_anthropic_key
 AI_QUALITY_MODEL=                       # blank = claude-sonnet-4-6
 
-# Fallback — activated when quality provider fails
 AI_FALLBACK_PROVIDER=grok
 AI_FALLBACK_API_KEY=your_xai_key
 AI_FALLBACK_MODEL=                      # blank = grok-3-fast
 
-# Defaults per provider:
-# anthropic  → claude-sonnet-4-6
-# deepseek   → deepseek-chat (DeepSeek V3)
-# grok/xai   → grok-3-fast
-# openai     → gpt-4o
-# gemini     → gemini-2.0-flash
-# groq       → llama-3.3-70b-versatile (legacy)
-# ollama     → llama3.2 (local, free)
-
 TELEGRAM_BOT_TOKEN=from_botfather
-DATABASE_URL=sqlite:///hireloop.db
+DATABASE_URL=sqlite:///hireloop.db      # server: sqlite:///data/hireloop.db
 OLLAMA_HOST=http://localhost:11434
 ```
 
 ---
 
-## AI Provider System — Tiered Architecture
+## AI Provider System
 
-Three provider slots: **fast** (bulk/cheap), **quality** (resume/cover letter), **fallback** (quality backup).
+Three slots: **fast** (bulk/cheap), **quality** (resume/cover letter), **fallback** (quality backup).
 
-```python
-fast     = AIFactory.create_fast()      # DeepSeek V3
-quality  = AIFactory.create_quality()   # Anthropic claude-sonnet-4-6 (with prompt caching)
-fallback = AIFactory.create_fallback()  # Grok 3 Fast (optional — None if not configured)
-
-ai = HireLoopAI(fast_provider=fast, quality_provider=quality, fallback_provider=fallback)
-
-# High volume — uses fast provider (cheap)
-job     = await ai.parse_job(raw_jd_text)
-skills  = await ai.parse_resume(resume_text)
-fit     = await ai.analyze_fit(job, user_profile)
-
-# High stakes — uses quality provider (best)
-resume  = await ai.tailor_resume(job, fit, base_resume, verified_skills)
-cl      = await ai.write_cover_letter(job, user_profile, fit)
-answers = await ai.answer_screening_questions(questions, job, user_profile)
-```
-
-### Task → Provider mapping
-| Task | Provider | Reason |
+| Task                       | Provider | Reason                              |
 |---|---|---|
-| parse_job | fast | Runs on every scraped job (50+/day) |
-| parse_resume | fast | One-time, not quality-critical |
-| analyze_fit | fast | Runs on every job above threshold |
-| tailor_resume | quality | Goes on your resume — must be best |
-| write_cover_letter | quality | Represents you to recruiters |
-| answer_screening_questions | quality | High-stakes interview gating |
-
-### Adding a new provider
-1. Create `ai/providers/myprovider.py`
-2. Subclass `AIProvider` from `ai/base.py`
-3. Implement `complete()`, `complete_json()`, and `provider_name`
-4. Add to `AIFactory._build()` match statement in `factory.py`
-
----
-
-## Database Schema — Skill Graph
-
-Build in `db/models.py` using SQLAlchemy async.
-
-```python
-class User(Base):
-    __tablename__ = "users"
-    id              = Column(String, primary_key=True)  # UUID
-    telegram_id     = Column(String, unique=True)
-    name            = Column(String)
-    filters         = Column(JSON)     # role, location, salary, remote, blacklist
-    notify_freq     = Column(String)   # "daily" | "twice_daily"
-    min_fit_score   = Column(Integer, default=60)
-    daily_app_limit = Column(Integer, default=5)
-    onboarded       = Column(Boolean, default=False)
-    created_at      = Column(DateTime)
-    last_active     = Column(DateTime, nullable=True)   # updated on every interaction
-    timezone        = Column(String, default="America/Vancouver")  # IANA tz string
-
-class SkillNode(Base):
-    __tablename__ = "skill_nodes"
-    id           = Column(Integer, primary_key=True)
-    user_id      = Column(String, ForeignKey("users.id"))
-    skill_name   = Column(String)
-    # verified_resume | verified_attested | partial | gap
-    status       = Column(String)
-    # high | medium | low — from resume parse
-    confidence   = Column(String)
-    created_at   = Column(DateTime)
-    updated_at   = Column(DateTime)
-
-class SkillEvidence(Base):
-    __tablename__ = "skill_evidence"
-    id               = Column(Integer, primary_key=True)
-    skill_node_id    = Column(Integer, ForeignKey("skill_nodes.id"))
-    company          = Column(String)
-    role_title       = Column(String)
-    duration_months  = Column(Integer)
-    last_used_year   = Column(Integer)
-    user_context     = Column(Text)   # user's own words
-    generated_bullet = Column(Text)   # Claude's polished bullet
-    source           = Column(String) # "resume" | "telegram" | "manual"
-
-class Job(Base):
-    __tablename__ = "jobs"
-    id                    = Column(String, primary_key=True)  # UUID
-    user_id               = Column(String, ForeignKey("users.id"))
-    title                 = Column(String)
-    company               = Column(String)
-    url                   = Column(String)
-    raw_jd                = Column(Text)
-    parsed                = Column(JSON)    # output of parse_job()
-    fit_score             = Column(Float)
-    cover_letter_required = Column(Boolean, default=False)
-    recruiter_name        = Column(String)  # Phase 2
-    recruiter_linkedin    = Column(String)  # Phase 2
-    # pending|skill_verify|approved|skipped|applied
-    status                = Column(String)
-    created_at            = Column(DateTime)
-
-class Application(Base):
-    __tablename__ = "applications"
-    id                 = Column(Integer, primary_key=True)
-    job_id             = Column(String, ForeignKey("jobs.id"))
-    resume_path        = Column(String)
-    cover_letter_path  = Column(String)
-    applied_at         = Column(DateTime)
-    # interview | rejected | ghosted | offer
-    outcome            = Column(String)
-    outcome_source     = Column(String)  # email | manual | telegram
-    outcome_at         = Column(DateTime)
-```
-
----
-
-## Telegram Bot
-
-### Commands (register with @BotFather)
-```
-/start     - Onboarding wizard (or re-run)
-/skills    - View skill graph summary
-/resume    - Upload new resume version
-/jobs      - Pending jobs waiting for action
-/history   - Past applications + outcomes
-/settings  - Edit all preferences
-/filters   - Quick filter access
-/timezone  - Set timezone for scheduled scrapes
-/pause     - Pause job hunting
-/help      - Full command list
-```
-
-### Persistent keyboard (always visible)
-```python
-MAIN_KEYBOARD = ReplyKeyboardMarkup([
-    ["📎 Add Resume",   "🎛️ Edit Filters"],
-    ["📊 My Skills",    "📋 Pending Jobs"],
-    ["⏸ Pause Agent",  "⚙️ Settings"],
-], resize_keyboard=True)
-```
-
----
-
-## Onboarding Flow (6 ConversationHandler states)
-
-```
-STATE: WELCOME
-  Send welcome message + [✅ Let's go] button
-
-STATE: UPLOAD_RESUME
-  "Send 1–4 resume PDFs or Word docs"
-  On each document: download → extract text → call ai.parse_resume()
-  Button: [✅ Done uploading]
-
-STATE: CONFIRM_SKILLS
-  Show extracted skills grouped by confidence
-  High confidence: auto-confirmed
-  Medium/Low: show [✅ Confirm] [✏️ Add context] [❌ Remove] per skill
-  If "Add context": ask for one sentence → save as user_context
-  Save all confirmed to SkillNode + SkillEvidence
-
-STATE: SET_FILTERS
-  Ask role, location, remote pref, min salary, blacklist companies
-  Save to user.filters JSON
-
-STATE: SET_FREQUENCY
-  [📬 Daily digest] [⚡ Real-time] [2x per day]
-  Min fit score: [50%] [60%] [70%] [80%]
-
-STATE: DONE
-  "All set! Running first job search now..."
-  Trigger first scrape
-```
-
----
-
-## Job Notification Format (send this in Telegram)
-
-Default card is CONDENSED — never dump the full JD on the user.
-"View Full JD" button sends the full posting as a separate message on demand.
-
-```
-🏢 {title}
-{company} · {location} · {salary_or_range}
-
-Fit Score: {score}% · {action_label}
-
-✅ Matched: Python, FastAPI, PostgreSQL
-❓ Gaps: Django (required), Kafka (preferred)
-
-[✅ I know these] [⏭ Skip] [📄 Full JD] [🔗 Open Link]
-```
-
-### [📄 Full JD] button behaviour
-Sends a follow-up message (does NOT replace the card):
-```
-📄 {title} @ {company}
-
-{raw_jd, truncated to 3000 chars if longer}
-
-🔗 {url}
-```
-
-### After user confirms skills
-- Parse context → update SkillNode → create SkillEvidence
-- Recalculate fit score
-- "Updated! New score: X%. Generating resume..."
+| parse_job                  | fast     | Runs on every scraped job (50+/day) |
+| parse_resume               | fast     | One-time, not quality-critical      |
+| analyze_fit                | fast     | Runs on every job above threshold   |
+| tailor_resume              | quality  | Goes on your resume — must be best  |
+| write_cover_letter         | quality  | Represents you to recruiters        |
+| answer_screening_questions | quality  | High-stakes interview gating        |
 
 ---
 
 ## Cover Letter Logic — CRITICAL
 
 ONLY generate a cover letter when one of these is true:
-1. job.cover_letter_required = True (JD mentioned it)
+1. `job.cover_letter_required = True` (JD mentioned it)
 2. User explicitly tapped [📝 Add Cover Letter] button
 
 NEVER auto-generate without one of those triggers.
 
-Detection in parse_job() scans for:
-"cover letter", "covering letter", "letter of motivation", "please include"
+Detection in `parse_job()` scans for:
+`"cover letter"`, `"covering letter"`, `"letter of motivation"`, `"please include"`
 
 ---
 
-## Skill Graph — Evidence Travels Automatically
+## Skill Graph
 
-Once a skill is confirmed with context, it generates bullets forever:
-
-```python
-# User confirms: "Kafka at Acme Corp, 8 months, order processing pipeline"
-# Saved as:
-SkillNode(skill_name="Apache Kafka", status="verified_attested")
-SkillEvidence(company="Acme Corp", duration_months=8,
-              user_context="built async order processing pipeline")
-
-# Next Kafka job → Claude auto-writes:
-# "Designed Kafka-based event pipeline for order processing at Acme Corp (8 months)"
-# User never explains Kafka again.
-```
-
----
-
-## Job Scraping
-
-### Primary — JobSpy (free, use this)
-```python
-from jobspy import scrape_jobs
-
-jobs = scrape_jobs(
-    site_name=["indeed", "linkedin", "glassdoor"],
-    search_term=user_filters["role"],
-    location=user_filters["location"],
-    is_remote=user_filters.get("remote_only", False),
-    results_wanted=25,
-    hours_old=24,
-)
-```
-
-### User-pasted URLs — Jina Reader
-```python
-import httpx
-async def fetch_job_from_url(url: str) -> str:
-    async with httpx.AsyncClient() as client:
-        r = await client.get(f"https://r.jina.ai/{url}", timeout=30)
-        return r.text
-```
-
-Filters run BEFORE passing jobs to fit analysis:
-- Salary minimum
-- Blacklisted companies/industries
-- Seniority match
-- Deduplicate by URL hash
-- Fit score threshold (skip notification if below user.min_fit_score)
-
----
-
-## Phase 1 Build Order
-
-### Phase 1 — Complete ✅
-
-All features shipped and tested:
-
-- **Foundation**: AI provider layer (5 providers), factory, tiered routing, in-memory cache
-- **Database**: SQLAlchemy async, skill graph schema (User · SkillNode · SkillEvidence · Job · Application)
-- **Telegram bot**: onboarding wizard (12 states), skill verify, job approval, settings, /addskills
-- **Job scraper**: JobSpy (Indeed ✅ · LinkedIn ⚠️ partial · Glassdoor ✅ · Google ❌ skipped), Jina URL paste, APScheduler, dedup
-- **Resume pipeline**: generator, section order (pure Python), DOCX export (python-docx), PDF export (reportlab)
-- **Edit loop**: patch_resume() + apply_patch() → AI-targeted section edits
-- **Quality controls**: input caps (two-layer), standing instructions, experience filtering (max 4 entries, drop >10yr)
-- **Resume curation**: CORE/RELEVANT/MARGINAL/CUT tiers, KEEP TEST, CUT LIST, matched_skills in AI prompt, omitted role reporting
-- **Application tracking**: /myapps history, outcome logging
-
-Hosting (done):
-- OCI Ampere A1 (ARM64, Always Free) — bot running 24/7
-- Docker + Litestream (SQLite → OCI Object Storage backup every 5s)
-- systemd auto-boot on server reboot
-- GitHub Actions CI/CD — push to main → auto-deploys via SSH
-- App dir: /opt/hireloop/app, DB: /mnt/blockdata/data/hireloop.db
-
-Next steps (to be planned):
-- Self-hosted LLM — Ollama on same OCI instance for zero-cost quality inference
-
-Scripts:
-- `python scripts/test_provider.py`  — AI provider smoke test
-- `python scripts/run_scrape.py`     — standalone scrape for any onboarded user
+Once a skill is confirmed with context, its evidence is reused forever.
+User explains Kafka once → every future Kafka job gets a polished bullet automatically.
+Evidence in `SkillEvidence.user_context`; bullets generated by `ai.tailor_resume()`.
 
 ---
 
 ## Coding Rules — Always Follow These
 
 1. Always use async/await — bot and AI calls are all async
-2. Never hardcode a provider — always AIFactory.create_fast()/create_quality()
-3. Never include a skill in a resume unless SkillNode.status is "verified_*"
-4. Never generate a cover letter unless job.cover_letter_required=True OR user requested
-5. SQLAlchemy models only in db/models.py — no raw SQL strings
-6. All InlineKeyboardMarkup in bot/keyboards.py — not inline in handlers
-7. ConversationHandler for all multi-step Telegram flows
-8. All secrets from .env only — never hardcode
+2. Never hardcode a provider — always `AIFactory.create_fast()` / `create_quality()`
+3. Never include a skill in a resume unless `SkillNode.status` is `"verified_*"`
+4. Never generate a cover letter unless `job.cover_letter_required=True` OR user requested
+5. SQLAlchemy models only in `db/models.py` — no raw SQL strings
+6. All `InlineKeyboardMarkup` in `bot/keyboards.py` — not inline in handlers
+7. `ConversationHandler` for all multi-step Telegram flows
+8. All secrets from `.env` only — never hardcode
 9. Log everything to DB — every job seen, skill verified, application made
 10. Filters run BEFORE scraping — pass to JobSpy, don't post-filter a huge list
-11. Resume stored as Markdown TEXT in DB — render to .docx (python-docx) or PDF (reportlab) on-demand
-12. .docx is primary format (ATS-safe); PDF is on-request only — use python-docx NOT pypandoc (pypandoc converts MD tables → Word tables = ATS killer)
-13. Section order inferred from profile via section_order.py — zero tokens, pure Python decision tree
-14. Background scheduling via APScheduler AsyncIOScheduler — not n8n
+11. Resume stored as Markdown TEXT in DB — render to `.docx` (python-docx) or PDF (reportlab) on-demand
+12. `.docx` is primary format (ATS-safe); PDF on-request only — use python-docx NOT pypandoc
+    (pypandoc converts MD tables → Word tables = ATS killer)
+13. Section order inferred from profile via `section_order.py` — zero tokens, pure Python
+14. Background scheduling via APScheduler `AsyncIOScheduler` — not n8n
 
 ---
 
-## Do NOT Build in Phase 1
+## Hosting
 
-- Web dashboard → Phase 3
-- Auto-apply / Playwright → Phase 3
-- Recruiter finder → Phase 2
-- Gmail/email integration → Phase 3
-- Multi-user SaaS auth → Phase 2+
-- Stripe billing → Phase 2
-- Company career page scraping → Phase 2
-
----
-
-## Next Steps (immediate)
-- Batch API — queue nightly parse_and_analyze_fit calls via Anthropic Batch API for 50% off (to be planned)
-- Self-hosted LLM — Ollama on OCI instance for zero-cost quality inference (to be planned)
-
-## Recent Changes (May 2026)
-- **Scheduler**: Replaced fixed 08:00/18:00 UTC cron with hourly tick (Mon–Fri) + per-user timezone check via `zoneinfo`
-- **Timezone**: Added `user.timezone` field (IANA string, default `America/Vancouver`); `/timezone` command with preset list
-- **Inactivity**: Added `user.last_active` field; weekday-only inactivity gate (>3 business days → warn once); weekends excluded from count
-- **Company dedup**: `_get_seen()` now returns `recent_company_counts`; `apply_filters()` skips companies with ≥2 jobs in last 7 days
-- **Background analysis**: `_analyze_remaining()` now sends completion summary ("N more matched") after finishing
-- **Realtime removed**: `freq_realtime` option removed from frequency keyboard, onboarding, and `_hours_for_freq()`
-- **AI providers**: DeepSeek V3 as fast provider, Grok as fallback, Anthropic prompt caching (`cache_control: ephemeral`)
-- **DB migration**: New columns require `ALTER TABLE users ADD COLUMN last_active DATETIME` + `ADD COLUMN timezone TEXT DEFAULT 'America/Vancouver'` on existing DBs
-
-## Phase 2 (after 30 days of real usage)
-- Recruiter finder (3-tier: parse JD → LinkedIn search → web search)
-- Application rate limiter (daily cap + 30-day same-company cooldown)
-- Outcome tracking (interview? reject? offer?)
-- Salary intel step before fit analysis
-- Multi-user via Telegram Supergroup Topics
-- Postgres migration
-
-## Phase 3 (6–12 months)
-- Auto-apply: Playwright fills Workday/Greenhouse/Lever forms
-- Platform classifier (identify ATS before filling)
-- Screenshot proof of every submission
-- Gmail integration for outcome loop
-- Web dashboard (Next.js)
-- Supabase multi-tenant auth
+- OCI Ampere A1 (ARM64, Always Free) — bot running 24/7
+- Docker + Litestream (SQLite → OCI Object Storage backup every 5s)
+- systemd auto-boot on server reboot
+- GitHub Actions CI/CD — push to main → auto-deploys via SSH
+- App dir: `/opt/hireloop/app`  |  DB: `/mnt/blockdata/data/hireloop.db`
 
 ---
 
@@ -492,19 +110,26 @@ Phase 1 complete. All features shipped and hosted.
 Scraper status:
 - Indeed ✅
 - LinkedIn ⚠️ not fully tested (may have bugs)
-- Google Jobs ❌ skipped (JS-only page, JobSpy broken, revisit Phase 2)
-- Glassdoor ✅ working via curl_cffi patch (see jobs/glassdoor_patch.py)
+- Google Jobs ❌ skipped (JS-only, JobSpy broken — revisit Phase 2)
+- Glassdoor ✅ via curl_cffi patch (`jobs/glassdoor_patch.py`)
+  Canadian IPs → glassdoor.ca redirect + Cloudflare 403 fix. Monkey-patched at import in `scraper.py`.
 
-### Glassdoor fix summary
-Canadian IPs get geo-redirected glassdoor.com → glassdoor.ca, where Cloudflare
-blocks tls_client (JobSpy default) with 403.  Fix: monkey-patch in jobs/glassdoor_patch.py
-replaces JobSpy's create_session with curl_cffi (Chrome124 impersonation) and tolerates
-partial GraphQL errors (SEO-only 503s are non-fatal).  Applied at import time in scraper.py.
-
-### Scripts
+Scripts:
 ```bash
 python scripts/test_provider.py  # AI provider smoke test (fast + quality)
-python scripts/run_scrape.py     # Standalone scrape — auto-detects first onboarded user
+python scripts/run_scrape.py     # standalone scrape for any onboarded user
 ```
 
-Resume generation is tested through the live bot (approve job card → generate → edit → DOCX).
+---
+
+## Next Steps
+- Batch API — Anthropic Batch API for `parse_job`/`analyze_fit` (50% cost reduction)
+- Self-hosted LLM — Ollama on OCI instance for zero-cost quality inference
+
+---
+
+## Phase 2 (after 30 days real usage)
+- Recruiter finder, application rate limiter, outcome tracking, salary intel, Postgres migration
+
+## Phase 3 (6–12 months)
+- Auto-apply (Playwright), Gmail integration for outcome loop, web dashboard (Next.js)

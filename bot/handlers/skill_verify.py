@@ -31,6 +31,7 @@ from telegram.ext import (
     filters,
 )
 
+from bot.conversation_utils import TEXT_INPUT, escape_fallbacks
 from db.models import Job, SkillEvidence, SkillNode, User
 from db.session import AsyncSessionLocal
 
@@ -371,12 +372,22 @@ async def job_save(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def job_apply_later(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles job_later_{id} — keeps job in pending (back of queue), moves on."""
+    """Handles job_later_{id} — stamps apply_later_at to push job to back of queue."""
+    from sqlalchemy import select
     from jobs.scheduler import send_next_pending_card
 
     query  = update.callback_query
     await _safe_answer(query)
-    await query.edit_message_text("🕐 Saved for later — still in your queue.")
+    job_id = query.data.split("job_later_", 1)[1]
+
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            result = await session.execute(select(Job).where(Job.id == job_id))
+            job = result.scalar_one_or_none()
+            if job:
+                job.apply_later_at = datetime.utcnow()
+
+    await query.edit_message_text("🕐 Added to the back of your queue.")
     await send_next_pending_card(str(update.effective_user.id), context.bot)
 
 
@@ -474,13 +485,13 @@ def build_skill_verify_handler() -> ConversationHandler:
         ],
         states={
             VERIFY_CONTEXT: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_verify_context),
+                MessageHandler(TEXT_INPUT, handle_verify_context),
             ],
             VERIFY_DATE: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_verify_date),
+                MessageHandler(TEXT_INPUT, handle_verify_date),
             ],
         },
-        fallbacks=[],
+        fallbacks=escape_fallbacks(),
         allow_reentry=True,
     )
 

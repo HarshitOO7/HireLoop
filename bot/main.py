@@ -20,6 +20,9 @@ load_dotenv()
 
 # Suppress PTB per_message warning
 warnings.filterwarnings("ignore", message=".*per_message.*", category=UserWarning)
+# Suppress datetime.utcnow() deprecation noise — DB columns are naive UTC by design,
+# switching to timezone-aware now() would mix naive/aware values in comparisons.
+warnings.filterwarnings("ignore", message=".*utcnow.*", category=DeprecationWarning)
 
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, TypeHandler, filters
@@ -39,9 +42,10 @@ from bot.handlers.skill_verify import (
 from bot.handlers.job_approval import (
     get_job_approval_handlers,
     build_resume_edit_handler,
-    get_my_applications_handlers,
-    cmd_my_applications,
+    build_myapps_handler,
+    build_saved_handler,
 )
+from bot.conversation_utils import on_error
 from bot.keyboards import MAIN_KEYBOARD
 from bot.security import check_rate_limit, guard_input
 from db.models import Base
@@ -213,13 +217,12 @@ async def handle_keyboard_buttons(update, context):
     text = update.message.text
 
     routes = {
-        "📊 My Skills":       cmd_skills,
-        "⚙️ Settings":        cmd_settings,
-        "🎛️ Edit Filters":    cmd_filters,
-        "⏸ Pause Agent":     cmd_pause,
-        "📋 Pending Jobs":    cmd_pending_jobs,
-        "🔍 Fetch Jobs":      cmd_fetch_now,
-        "📁 My Applications": cmd_my_applications,
+        "📊 My Skills":    cmd_skills,
+        "⚙️ Settings":     cmd_settings,
+        "🎛️ Edit Filters": cmd_filters,
+        "⏸ Pause Agent":  cmd_pause,
+        "📋 Pending Jobs": cmd_pending_jobs,
+        "🔍 Fetch Jobs":   cmd_fetch_now,
     }
     handler = routes.get(text)
     if handler:
@@ -337,7 +340,8 @@ def main():
 
     app.add_handler(get_jobs_command_handler())
     app.add_handler(CommandHandler("fetchnow", cmd_fetch_now))
-    app.add_handler(CommandHandler("myapps", cmd_my_applications))
+    app.add_handler(build_myapps_handler())
+    app.add_handler(build_saved_handler())
 
     for h in get_job_card_handlers():
         app.add_handler(h)
@@ -345,11 +349,11 @@ def main():
     for h in get_job_approval_handlers():
         app.add_handler(h)
 
-    for h in get_my_applications_handlers():
-        app.add_handler(h)
-
     # Catch-all for persistent keyboard taps
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_keyboard_buttons))
+
+    # Global error handler — graceful reply on any unhandled exception
+    app.add_error_handler(on_error)
 
     logger.info("HireLoop bot starting — press Ctrl+C to stop")
     app.run_polling(drop_pending_updates=True)
