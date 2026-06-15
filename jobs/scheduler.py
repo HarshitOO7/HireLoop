@@ -512,17 +512,23 @@ async def run_scrape_cycle(bot, ai, telegram_id: str | None = None) -> int:
                     if last_warned and (datetime.utcnow() - last_warned).days < 5:
                         logger.info("[scheduler] skipping inactive user=%s (warned recently)", user.telegram_id)
                         continue
-                    await bot.send_message(
-                        chat_id=user.telegram_id,
-                        text="You've been inactive for a few days — send any message or tap 🔍 Fetch Jobs to resume auto-scraping.",
-                    )
+                    # A blocked/deleted chat raises here (e.g. telegram.error.Forbidden).
+                    # Never let one user's send failure crash the whole scrape cycle.
+                    try:
+                        await bot.send_message(
+                            chat_id=user.telegram_id,
+                            text="You've been inactive for a few days — send any message or tap 🔍 Fetch Jobs to resume auto-scraping.",
+                        )
+                        logger.info("[scheduler] inactivity warning sent to user=%s", user.telegram_id)
+                    except Exception as e:
+                        logger.warning("[scheduler] could not send inactivity warning to user=%s: %s", user.telegram_id, e)
+                    # Record the attempt regardless, so we don't retry a doomed send every cycle.
                     new_filters = {**(user.filters or {}), "inactivity_warned_at": datetime.utcnow().isoformat()}
                     async with AsyncSessionLocal() as session:
                         async with session.begin():
                             await session.execute(
                                 update(User).where(User.id == user.id).values(filters=new_filters)
                             )
-                    logger.info("[scheduler] inactivity warning sent to user=%s", user.telegram_id)
                     continue
 
         if (user.filters or {}).get("paused"):

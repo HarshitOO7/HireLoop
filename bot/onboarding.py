@@ -143,6 +143,13 @@ async def _save_onboarding_to_db(telegram_id: str, name: str, confirmed_skills: 
             if resume_facts:
                 user.resume_facts = resume_facts
 
+            # Replace the skill graph ONLY when we actually have new skills to write.
+            # An empty confirmed_skills means this save is filters-only (e.g. the
+            # "Update filters" path) — wiping here would silently destroy the user's
+            # entire skill graph. Guard against that data loss.
+            if not confirmed_skills:
+                return
+
             # Wipe old skill nodes for this user (re-onboarding)
             old_nodes = await session.execute(
                 select(SkillNode).where(SkillNode.user_id == user.id)
