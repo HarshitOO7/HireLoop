@@ -10,7 +10,11 @@ services:
       - litestream
 
   litestream:
-    image: litestream/litestream:latest
+    image: litestream/litestream:0.5.11          # pinned — :latest changed behavior under us
+    # Run as root so it can write to the bot-owned (root:root) SQLite DB.
+    # Litestream v0.5 writes a _litestream_seq table INTO the db to track
+    # replication; without write access it fails with "readonly database".
+    user: "0:0"
     env_file: .env
     volumes:
       - /opt/hireloop/data:/data                 # same host dir the bot uses

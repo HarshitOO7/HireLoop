@@ -11,5 +11,7 @@ sudo docker compose run --rm --no-deps bot bash -c \
   || { echo "Syntax errors found — aborting deploy"; exit 1; }
 
 sudo docker compose run --rm --no-deps bot bash -c "alembic upgrade head"
-sudo docker compose up -d --build bot
+# Build/recreate every service whose image or config changed (not just bot) so
+# docker-compose changes to the litestream sidecar actually deploy.
+sudo docker compose up -d --build
 sudo docker compose logs --tail=20 bot

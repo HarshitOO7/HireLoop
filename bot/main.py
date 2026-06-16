@@ -258,6 +258,10 @@ def _build_allowlist(raw: str) -> tuple[set[int], set[str]] | None:
 async def _init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    # create_all makes missing tables but not missing columns — reconcile any
+    # model columns added after a table was first created (see ensure_schema_columns).
+    from db.session import ensure_schema_columns
+    await ensure_schema_columns(Base)
 
 
 def main():
