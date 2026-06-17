@@ -10,8 +10,12 @@ dbs:
         secret-access-key: ${LITESTREAM_SECRET_KEY}
         force-path-style: true
 
-        # Low-write Telegram bot — reduce API calls without sacrificing durability
-        sync-interval: 5s
+        # Low-write Telegram bot — minimize object-storage requests (OCI Always-Free
+        # = 50k/mo). The daily snapshot is the backup guarantee; sync-interval only
+        # ships WAL between snapshots and v0.3 only PUTs when the WAL changed, so a
+        # long interval costs almost nothing. Worst-case data loss on a crash =
+        # ~5 min (and never worse than the last daily snapshot).
+        sync-interval: 5m
         snapshot-interval: 24h
-        retention: 168h              # 7 days
-        retention-check-interval: 1h
+        retention: 168h              # keep 7 daily snapshots
+        retention-check-interval: 24h

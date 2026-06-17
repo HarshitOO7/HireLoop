@@ -10,10 +10,12 @@ services:
       - litestream
 
   litestream:
-    image: litestream/litestream:0.5.11          # pinned — :latest changed behavior under us
-    # Run as root so it can write to the bot-owned (root:root) SQLite DB.
-    # Litestream v0.5 writes a _litestream_seq table INTO the db to track
-    # replication; without write access it fails with "readonly database".
+    # Pinned to 0.3.x: v0.5's compaction monitors PUT to object storage on fixed
+    # timers regardless of writes (~480 req/hr idle — OCI Always-Free is 50k/mo),
+    # see litestream issue #1171. v0.3 only uploads on actual WAL changes + a
+    # daily snapshot → a few hundred requests/month. This config is v0.3-native.
+    image: litestream/litestream:0.3.13
+    # Run as root so it can write the shadow WAL next to the bot-owned (root:root) DB.
     user: "0:0"
     env_file: .env
     volumes:
