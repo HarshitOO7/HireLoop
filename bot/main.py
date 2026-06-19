@@ -221,6 +221,7 @@ async def handle_keyboard_buttons(update, context):
         "⚙️ Settings":     cmd_settings,
         "🎛️ Edit Filters": cmd_filters,
         "⏸ Pause Agent":  cmd_pause,
+        "▶️ Resume Agent": cmd_pause,
         "📋 Pending Jobs": cmd_pending_jobs,
         "🔍 Fetch Jobs":   cmd_fetch_now,
     }

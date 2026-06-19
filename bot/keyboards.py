@@ -148,13 +148,23 @@ def add_skill_confirm_keyboard(idx: int) -> InlineKeyboardMarkup:
 
 # ── Persistent main keyboard (always visible) ──────────────────────────────
 
-MAIN_KEYBOARD = ReplyKeyboardMarkup([
-    ["📎 Add Resume",   "🎛️ Edit Filters"],
-    ["📊 My Skills",    "📋 Pending Jobs"],
-    ["🔍 Fetch Jobs",   "💾 Saved Jobs"],
-    ["📁 My Apps",      "⚙️ Settings"],
-    ["⏸ Pause Agent"],
-], resize_keyboard=True)
+PAUSE_LABEL  = "⏸ Pause Agent"
+RESUME_LABEL = "▶️ Resume Agent"
+
+
+def main_keyboard(paused: bool = False) -> ReplyKeyboardMarkup:
+    """Persistent main keyboard. Last row shows Resume when paused, Pause when active."""
+    return ReplyKeyboardMarkup([
+        ["📎 Add Resume",   "🎛️ Edit Filters"],
+        ["📊 My Skills",    "📋 Pending Jobs"],
+        ["🔍 Fetch Jobs",   "💾 Saved Jobs"],
+        ["📁 My Apps",      "⚙️ Settings"],
+        [RESUME_LABEL if paused else PAUSE_LABEL],
+    ], resize_keyboard=True)
+
+
+# Default (active-state) keyboard for the many call sites that don't track pause state.
+MAIN_KEYBOARD = main_keyboard(False)
 
 
 # ── Job card keyboard ──────────────────────────────────────────────────────

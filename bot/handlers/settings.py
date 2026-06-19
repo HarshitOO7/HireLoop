@@ -21,7 +21,7 @@ from sqlalchemy.orm import selectinload
 
 from db.session import AsyncSessionLocal
 from db.models import User, SkillNode
-from bot.keyboards import MAIN_KEYBOARD, TZ_OPTIONS, timezone_keyboard
+from bot.keyboards import MAIN_KEYBOARD, TZ_OPTIONS, main_keyboard, timezone_keyboard
 
 logger = logging.getLogger(__name__)
 
@@ -236,7 +236,10 @@ async def cmd_pause(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not user:
                 await update.message.reply_text("Run /start first.")
                 return
-            filters_data = user.filters or {}
+            # Copy to a NEW dict — mutating user.filters in place and reassigning
+            # the same object is not detected by SQLAlchemy, so the change wouldn't
+            # persist (pause appeared to do nothing; Settings still showed active).
+            filters_data = dict(user.filters or {})
             paused = filters_data.get("paused", False)
             filters_data["paused"] = not paused
             user.filters = filters_data
@@ -247,7 +250,7 @@ async def cmd_pause(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"Job hunting <b>{status_word}</b>. {tail}",
         parse_mode="HTML",
-        reply_markup=MAIN_KEYBOARD,
+        reply_markup=main_keyboard(now_paused),
     )
 
 
@@ -280,7 +283,10 @@ async def cmd_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Resume instructions: <i>" + _e(instructions) + "</i>",
         "\nRun /start to update filters, /instructions to update resume instructions, /timezone to change timezone.",
     ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text(
+        "\n".join(lines), parse_mode="HTML",
+        reply_markup=main_keyboard(bool(f.get("paused"))),
+    )
 
 
 async def cmd_filters(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -394,7 +400,7 @@ async def _handle_instructions_input(update: Update, context: ContextTypes.DEFAU
             user = result.scalar_one_or_none()
             if not user:
                 return ConversationHandler.END
-            f = user.filters or {}
+            f = dict(user.filters or {})  # copy so SQLAlchemy detects the change
             if text.lower() == "clear":
                 f.pop("resume_instructions", None)
                 msg = "Instructions cleared — resumes will use default behaviour."

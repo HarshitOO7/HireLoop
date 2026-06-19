@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 # Simple buttons run a one-shot action; conv-entry buttons open another flow.
 SIMPLE_BUTTONS = {
     "📊 My Skills", "⚙️ Settings", "🎛️ Edit Filters",
-    "⏸ Pause Agent", "📋 Pending Jobs", "🔍 Fetch Jobs",
+    "⏸ Pause Agent", "▶️ Resume Agent", "📋 Pending Jobs", "🔍 Fetch Jobs",
 }
 CONV_ENTRY_BUTTONS = {"📎 Add Resume", "📁 My Apps", "💾 Saved Jobs"}
 MAIN_BUTTONS = SIMPLE_BUTTONS | CONV_ENTRY_BUTTONS
@@ -69,6 +69,7 @@ async def interrupt_handler(update: Update, context) -> int:
             "⚙️ Settings":     cmd_settings,
             "🎛️ Edit Filters": cmd_filters,
             "⏸ Pause Agent":  cmd_pause,
+            "▶️ Resume Agent": cmd_pause,
             "📋 Pending Jobs": cmd_pending_jobs,
             "🔍 Fetch Jobs":   cmd_fetch_now,
         }
