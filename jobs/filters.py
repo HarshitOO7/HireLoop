@@ -291,10 +291,19 @@ def apply_filters(
     skipped_stale = 0
 
     for job in raw_jobs:
-        # 0. Date cutoff — drop stale jobs the board failed to filter
+        # 0. Date cutoff — drop stale jobs the board failed to filter.
+        # Boards report date-only timestamps (no time), which _parse_date_posted
+        # reads as midnight. Comparing midnight against an intraday cutoff wrongly
+        # dropped every "yesterday" posting — e.g. with hours_old=12 at 07:34, a
+        # job dated yesterday (midnight) is >12h ago and got killed, even though
+        # the board already deemed it fresh. Indeed leans on date-only timestamps,
+        # so it was hit hardest. Compare at DAY granularity instead: only drop a
+        # job whose posted DATE is before the cutoff's date. JobSpy already
+        # filtered by hours_old server-side, so this is just a coarse safety net
+        # for genuinely old (2+ day) jobs that slipped through.
         if cutoff:
             posted = _parse_date_posted(job.get("date_posted"))
-            if posted and posted < cutoff:
+            if posted and posted.date() < cutoff.date():
                 skipped_stale += 1
                 logger.debug("[filters] stale: dropped %r (posted %s)", job.get("title"), posted.date())
                 continue
