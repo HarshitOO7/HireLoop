@@ -21,12 +21,15 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy import delete, func, select, update
 
 from bot.keyboards import job_card_keyboard
-from db.models import Job, SkillNode, User
+from db.models import Job, ScrapeRun, SkillNode, User
 from db.session import AsyncSessionLocal
 from jobs.filters import apply_filters, semantic_key, url_hash
 from jobs.scraper import scrape_for_user
 
 logger = logging.getLogger(__name__)
+
+# Alert the user when a board returns 0 results this many scrapes in a row.
+HEALTH_ALERT_THRESHOLD = 3
 
 
 # ── DB helpers ───────────────────────────────────────────────────────────────
@@ -270,11 +273,56 @@ def _weekday_days_since(dt: datetime | None) -> int:
     return count
 
 
+async def _record_scrape_health(user, per_site: dict, total_raw: int, is_manual: bool, bot) -> None:
+    """Persist one ScrapeRun and DM the user if a board JUST hit the miss threshold.
+
+    Alerts fire once (streak == threshold exactly) and reset automatically when the
+    board returns results again. The send is best-effort (blocked users are ignored).
+    """
+    sites = list(per_site.keys())
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            session.add(ScrapeRun(
+                user_id=user.id, started_at=datetime.utcnow(),
+                is_manual=is_manual, per_site=per_site, total_raw=total_raw,
+            ))
+        result = await session.execute(
+            select(ScrapeRun.per_site)
+            .where(ScrapeRun.user_id == user.id)
+            .order_by(ScrapeRun.started_at.desc())
+            .limit(HEALTH_ALERT_THRESHOLD + 1)
+        )
+        runs = [r[0] or {} for r in result.all()]   # newest-first, includes the run just inserted
+
+    for site in sites:
+        if (per_site.get(site) or {}).get("results", 0) > 0:
+            continue  # not a miss this run → can't be in a streak
+        streak = 0
+        for run in runs:
+            if (run.get(site) or {}).get("results", 0) == 0:
+                streak += 1
+            else:
+                break
+        if streak == HEALTH_ALERT_THRESHOLD:
+            try:
+                await bot.send_message(
+                    chat_id=user.telegram_id,
+                    text=(f"⚠️ <b>{site}</b> returned nothing for {HEALTH_ALERT_THRESHOLD} scrapes in a row — "
+                          "it may be blocked, or your search terms found nothing there. "
+                          "Other boards are still running. Use /health for details."),
+                    parse_mode="HTML",
+                )
+                logger.info("[scheduler] health alert sent user=%s site=%s", user.telegram_id, site)
+            except Exception as e:
+                logger.warning("[scheduler] health alert send failed user=%s: %s", user.telegram_id, e)
+
+
 async def _process_user(user: User, bot, ai, is_manual: bool = False) -> int:
     logger.info("[scheduler] processing user=%s", user.telegram_id)
 
     role_variants = await _get_role_variants(user, ai)
-    raw_jobs = await scrape_for_user(user, role_variants=role_variants or None)
+    raw_jobs, per_site = await scrape_for_user(user, role_variants=role_variants or None)
+    await _record_scrape_health(user, per_site, len(raw_jobs), is_manual, bot)
 
     if not raw_jobs:
         if is_manual:

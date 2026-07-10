@@ -82,12 +82,17 @@ def _dedup_variants(terms: list[str], cap: int) -> list[str]:
     return result
 
 
-async def scrape_for_user(user, role_variants: list[str] | None = None) -> list[dict]:
+async def scrape_for_user(
+    user, role_variants: list[str] | None = None
+) -> tuple[list[dict], dict[str, dict[str, int]]]:
     """
     Scrape jobs for a user based on their stored filters.
 
     role_variants: AI-expanded title list (e.g. ["Software Engineer", "SWE", "Backend Dev"]).
                    Falls back to user.filters["role"] if not provided.
+
+    Returns (records, per_site) where per_site is
+    {site: {"results": int, "errors": int}} for health tracking.
     """
     f = user.filters or {}
     role      = (f.get("role") or "").strip()
@@ -104,7 +109,7 @@ async def scrape_for_user(user, role_variants: list[str] | None = None) -> list[
     raw_terms = role_variants or ([role] if role else [])
     if not raw_terms:
         logger.warning("[scraper] user %s has no role filter — skipping scrape", user.telegram_id)
-        return []
+        return [], {s: {"results": 0, "errors": 0} for s in sites}
 
     # ── Dedup then cap ────────────────────────────────────────────────────────
     search_terms = _dedup_variants(raw_terms, MAX_VARIANTS)
@@ -155,10 +160,11 @@ async def scrape_for_user(user, role_variants: list[str] | None = None) -> list[
             if df is not None and not df.empty:
                 logger.debug("[scraper] %s term=%r loc=%r → %d results",
                              site, term, loc or "any", len(df))
-                return df
+                return (site, len(df), False, df)
+            return (site, 0, False, None)
         except Exception as e:
             logger.error("[scraper] %s failed term=%r loc=%r: %s", site, term, loc, e)
-        return None
+            return (site, 0, True, None)
 
     # ── Fan out all (term × location × site) combos in parallel ──────────────
     loop = asyncio.get_event_loop()
@@ -168,11 +174,19 @@ async def scrape_for_user(user, role_variants: list[str] | None = None) -> list[
         for loc in search_locations
         for site in sites
     ]
-    dfs = await asyncio.gather(*tasks)
+    results = await asyncio.gather(*tasks)
+
+    # Aggregate per-site results/errors for health tracking, and collect the dfs.
+    per_site: dict[str, dict[str, int]] = {s: {"results": 0, "errors": 0} for s in sites}
+    all_dfs = []
+    for site, count, errored, df in results:
+        per_site[site]["results"] += count
+        if errored:
+            per_site[site]["errors"] += 1
+        if df is not None:
+            all_dfs.append(df)
 
     import pandas as pd
-    all_dfs = [df for df in dfs if df is not None]
-
     records: list[dict] = []
     if all_dfs:
         try:
@@ -183,7 +197,11 @@ async def scrape_for_user(user, role_variants: list[str] | None = None) -> list[
             pass
 
     logger.info(
+        "[scraper] per-site: %s",
+        "  ".join(f"{s}={per_site[s]['results']}(err={per_site[s]['errors']})" for s in sites),
+    )
+    logger.info(
         "[scraper] got %d raw jobs — %d variant(s) × %d location(s) × %d site(s) = %d tasks",
         len(records), len(search_terms), len(search_locations), len(sites), total_tasks,
     )
-    return records
+    return records, per_site

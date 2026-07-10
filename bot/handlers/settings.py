@@ -20,7 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from db.session import AsyncSessionLocal
-from db.models import User, SkillNode
+from db.models import User, SkillNode, ScrapeRun
 from bot.keyboards import MAIN_KEYBOARD, TZ_OPTIONS, main_keyboard, timezone_keyboard
 
 logger = logging.getLogger(__name__)
@@ -252,6 +252,56 @@ async def cmd_pause(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML",
         reply_markup=main_keyboard(now_paused),
     )
+
+
+async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Per-board scraper health: last scrape + each board's current miss streak."""
+    from jobs.scheduler import HEALTH_ALERT_THRESHOLD
+    tg_id = str(update.effective_user.id)
+    async with AsyncSessionLocal() as session:
+        user = (await session.execute(
+            select(User).where(User.telegram_id == tg_id)
+        )).scalar_one_or_none()
+        if not user:
+            await update.message.reply_text("Run /start first.")
+            return
+        runs = (await session.execute(
+            select(ScrapeRun.started_at, ScrapeRun.per_site)
+            .where(ScrapeRun.user_id == user.id)
+            .order_by(ScrapeRun.started_at.desc())
+            .limit(20)
+        )).all()
+
+    if not runs:
+        await update.message.reply_text("No scrapes recorded yet. Tap 🔍 Fetch Jobs to run one.")
+        return
+
+    last_at, last_per_site = runs[0]
+    last_per_site = last_per_site or {}
+    sites = list(last_per_site.keys()) or ["indeed", "linkedin", "glassdoor"]
+    when = f"{last_at.strftime('%b')} {last_at.day} {last_at.strftime('%H:%M')} UTC" if last_at else "—"
+
+    lines = ["<b>Scraper Health</b>\n", f"Last scrape: {when}\n"]
+    for site in sites:
+        streak = 0
+        for _, ps in runs:
+            if ((ps or {}).get(site) or {}).get("results", 0) == 0:
+                streak += 1
+            else:
+                break
+        cur = last_per_site.get(site) or {}
+        results, errors = cur.get("results", 0), cur.get("errors", 0)
+        if results > 0:
+            emoji, note = "✅", f"{results} results"
+        elif streak >= HEALTH_ALERT_THRESHOLD:
+            emoji, note = "❌", f"0 for {streak} scrapes (likely blocked)"
+        else:
+            emoji, note = "⚠️", f"0 for {streak} scrape{'s' if streak != 1 else ''}"
+        if errors:
+            note += f", {errors} error{'s' if errors != 1 else ''}"
+        lines.append(f"{emoji} <b>{_e(site)}</b> — {_e(note)}")
+
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 
 async def cmd_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -493,7 +543,8 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>Jobs</b>\n"
         "/fetchnow -- trigger an immediate job search\n"
         "/jobs -- view pending jobs waiting for your action\n"
-        "/myapps -- view past applications and outcomes\n\n"
+        "/myapps -- view past applications and outcomes\n"
+        "/health -- per-board scraper status (is Indeed/LinkedIn working?)\n\n"
         "<b>Profile</b>\n"
         "/start -- onboarding wizard (or re-run to update)\n"
         "/skills -- view your skill graph\n"
@@ -524,6 +575,7 @@ def get_settings_handlers():
         CommandHandler("skills", cmd_skills),
         CommandHandler("deleteskill", cmd_deleteskill),
         CommandHandler("pause", cmd_pause),
+        CommandHandler("health", cmd_health),
         CommandHandler("settings", cmd_settings),
         CommandHandler("filters", cmd_filters),
         CommandHandler("timezone", cmd_timezone),

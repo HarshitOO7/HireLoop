@@ -100,8 +100,8 @@ async def main():
 
     # ── Scrape ────────────────────────────────────────────────────────────────
     logger.info("Scraping (hours_old=%d)...", args.hours)
-    raw_jobs = await scrape_for_user(user, role_variants=variants)
-    logger.info("Raw jobs: %d", len(raw_jobs))
+    raw_jobs, per_site = await scrape_for_user(user, role_variants=variants)
+    logger.info("Raw jobs: %d  per-site: %s", len(raw_jobs), per_site)
 
     if not raw_jobs:
         logger.warning("No jobs returned — check your network/sites config.")

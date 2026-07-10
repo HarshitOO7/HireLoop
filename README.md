@@ -1,784 +1,162 @@
 <p align="center">
   <h1 align="center">HireLoop</h1>
   <p align="center">
-    <b>Your autonomous job hunting agent — runs in Telegram, thinks with AI, never applies without your approval.</b>
+    <b>An autonomous job-hunting agent that runs in Telegram, thinks with AI, and never applies without your approval.</b>
   </p>
   <p align="center">
     <img src="https://img.shields.io/badge/python-3.11+-blue?style=flat-square&logo=python&logoColor=white" />
-    <img src="https://img.shields.io/badge/telegram-bot-2CA5E0?style=flat-square&logo=telegram&logoColor=white" />
-    <img src="https://img.shields.io/badge/AI-multi--provider-8A2BE2?style=flat-square" />
-    <img src="https://img.shields.io/badge/database-SQLite%20%7C%20PostgreSQL-003B57?style=flat-square&logo=sqlite&logoColor=white" />
-    <img src="https://img.shields.io/badge/phase--1-complete-green?style=flat-square" />
+    <img src="https://img.shields.io/badge/interface-Telegram-2CA5E0?style=flat-square&logo=telegram&logoColor=white" />
+    <img src="https://img.shields.io/badge/AI-provider--agnostic-8A2BE2?style=flat-square" />
+    <img src="https://img.shields.io/badge/database-SQLite-003B57?style=flat-square&logo=sqlite&logoColor=white" />
+    <img src="https://img.shields.io/badge/status-active%20%C2%B7%20self--hosted-brightgreen?style=flat-square" />
     <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" />
   </p>
 </p>
 
----
-
-## What Is HireLoop?
-
-HireLoop is a **human-in-the-loop autonomous job hunting agent** that runs entirely through Telegram.
-
-It scrapes jobs, scores your fit against your verified skill graph, generates a tailored resume for each job, and asks for your approval before doing anything. You stay in control — the bot does the grunt work.
-
-```
-Scrape jobs  →  Score fit  →  Verify skills  →  Generate resume  →  You approve  →  Log application
-     ↑                              ↓
-     └─────────── APScheduler runs this loop on your schedule ──────────────────┘
-```
-
-**Core principles:**
-- No skill is ever claimed without your explicit confirmation
-- No resume is sent without your approval
-- No application fires without per-job sign-off
-- Your entire interface is Telegram — no web app, no desktop client
+<!--
+TODO(demo): record a ~15s screen capture of the Telegram flow — /fetchnow → a job card
+with fit score → tap approve → resume .docx delivered — and save it to docs/demo.gif.
+A "show me it works" clip is the single highest-signal thing on this page.
+-->
+<p align="center"><img src="docs/demo.gif" alt="HireLoop Telegram demo" width="640" /></p>
 
 ---
 
-## Features
+## What it does
 
-| Feature | Status |
-|---|---|
-| Multi-provider AI (DeepSeek, Anthropic, Grok, OpenAI, Gemini, Ollama) | ✅ Done |
-| Three-tier AI routing (fast/quality/fallback) + Anthropic prompt caching | ✅ Done |
-| In-memory AI response cache (SHA-256 keyed) | ✅ Done |
-| 6-step Telegram onboarding wizard | ✅ Done |
-| Resume parsing (PDF + DOCX, parallel with asyncio.gather) | ✅ Done |
-| Skill graph with confidence levels + evidence | ✅ Done |
-| Skill deduplication ("Drupal" = "Drupal CMS") | ✅ Done |
-| Add/update skills post-onboarding (no wipe) | ✅ Done |
-| Interactive skill verify flow (confirm / add context / remove) | ✅ Done |
-| HTML skill graph report (sent as file, opens in browser) | ✅ Done |
-| Settings, filters, pause/resume, /menu keyboard refresh | ✅ Done |
-| Job scraping (JobSpy — Indeed, LinkedIn, Glassdoor, Google) | 🧪 Testing |
-| AI role title expansion (cached 24h, 6–8 variants) | ✅ Done |
-| URL-hash dedup + semantic dedup (title + company) | ✅ Done |
-| Company cooldown dedup (≥2 jobs/company in 7 days → skip) | ✅ Done |
-| URL-paste job ingestion (Jina Reader) | ✅ Done |
-| Fit scoring + job notification cards | ✅ Done |
-| Background analysis with completion summary ("N more matched") | ✅ Done |
-| Skill verification dialog (gap skills → evidence → DB) | ✅ Done |
-| APScheduler — hourly tick (Mon–Fri), fires at 08:00 + 18:00 per user timezone | ✅ Done |
-| Per-user timezone setting (/timezone command) | ✅ Done |
-| Weekday-only inactivity detection (>3 business days → warning) | ✅ Done |
-| /fetchnow — instant on-demand scrape | ✅ Done |
-| Auto-purge stale jobs after 10 days (keeps applied/approved) | ✅ Done |
-| Resume stored as Markdown in DB (render on-demand) | ✅ Done |
-| Resume tailoring — resume/generator.py | ✅ Done |
-| Word (.docx) export via python-docx (primary, ATS-controlled) | ✅ Done |
-| PDF export on-request via reportlab | ✅ Done |
-| ATS-safe output (single-col, no tables/boxes, standard headings) | ✅ Done |
-| Smart resume section order (inferred from profile, zero AI tokens) | ✅ Done |
-| Job approval screen — [📄 Word] [📋 PDF] [Both] [Skip] | ✅ Done |
-| Cover letter generation (on request only) | ✅ Done |
-| Application logging + /myapps history | ✅ Done |
-| Post-delivery resume edit loop (AI patch, re-send) | ✅ Done |
-| Skill evidence date follow-up (asks when if no date detected) | ✅ Done |
-| Standing resume instructions (/instructions — apply to every resume) | ✅ Done |
-| Experience filtering (max 4 entries, drop >10 yr old unless required) | ✅ Done |
-| Input length caps (skill evidence 400 chars, instructions/edits 600 chars) | ✅ Done |
-| Work experience curation (CORE / RELEVANT / MARGINAL / CUT tiers) | ✅ Done |
-| Matched skills injected into resume AI (JD-aware relevance scoring) | ✅ Done |
-| Omitted role transparency (bot surfaces every dropped role to user) | ✅ Done |
-| Humanization rules — no em dashes, no AI buzzwords (global, all resumes) | ✅ Done |
-| Ground-truth facts injection — degree/dates/GPA locked via `<facts>` block | ✅ Done |
-| VPS hosting — OCI Ampere A1, Docker, Litestream, systemd, CI/CD | ✅ Done |
-| Self-hosted LLM — Ollama on VPS for zero-cost quality inference | 🔜 Next |
-| Recruiter finder | 🔜 Phase 2 |
-| Embedding-based fit scoring (RAG / semantic similarity) | 🔜 Phase 3 |
-| Auto-apply (Playwright) | 🔜 Phase 3 |
+Applying to jobs by hand is slow and repetitive: read the posting, judge your fit, re-tailor your resume, reformat it so an ATS won't mangle it, apply, log it, repeat. HireLoop does the grunt work and keeps you in the loop for the decisions that matter.
+
+It scrapes fresh postings on a schedule, scores each against a **skill graph** it builds from your resume, generates a per-job tailored resume, and asks for your approval before anything represents you. In practice it turns ~20–30 minutes of manual tailoring per application into a few taps in a Telegram chat — an ~80% cut in hands-on time (personal-use estimate, not a benchmark).
+
+**Who it's for:** a single operator (me). It's self-hosted on Oracle Cloud's Always-Free tier, Telegram-first, and runs 24/7.
+
+**Non-negotiables, enforced in code:**
+- No skill is claimed without your explicit confirmation.
+- No resume is generated-and-sent without your approval.
+- No application fires without per-job sign-off.
 
 ---
 
 ## Architecture
 
+The agent is a pipeline with **human-in-the-loop gates** at the two points where trust matters — what skills you claim, and what resume goes out.
+
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Telegram Bot                              │
-│  bot/main.py · onboarding.py · handlers/ · keyboards.py         │
-│                                                                  │
-│  ConversationHandlers:                                           │
-│    /start     → onboarding wizard (12 states)                    │
-│    /addskills → add skills without wiping (6 states)             │
-│  CommandHandlers:                                                 │
-│    /skills /settings /filters /pause /help /menu /fetchnow       │
-│    /deleteskill                                                   │
-└────────────────────────┬────────────────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      AI Service Layer                            │
-│  ai/service.py — HireLoopAI                                      │
-│                                                                  │
-│   FAST provider (DeepSeek V3 / deepseek-chat)                    │
-│     parse_resume()  parse_job()  analyze_fit()                   │
-│     expand_role_titles()  ← cached 24h, 6–8 variants            │
-│                                                                  │
-│   QUALITY provider (Anthropic / claude-sonnet-4-6 + caching)    │
-│     tailor_resume()  write_cover_letter()                        │
-│     answer_screening_questions()  edit_resume()                  │
-│                                                                  │
-│   FALLBACK provider (Grok 3 Fast — quality backup)              │
-│                                                                  │
-│   ai/cache.py — SHA-256 in-memory cache (no repeat AI calls)    │
-│   ai/factory.py — reads .env, builds provider instances          │
-│   ai/providers/ — DeepSeek · Anthropic · Grok · OpenAI · Groq   │
-└────────────────────────┬────────────────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                       Database (SQLite → Postgres)               │
-│  db/models.py — SQLAlchemy async                                 │
-│  User · SkillNode · SkillEvidence · Job · Application            │
-└─────────────────────────────────────────────────────────────────┘
+                 ┌──────────────── APScheduler loop (08:00 / 18:00, your timezone) ───────────────┐
+                 ▼                                                                                 │
+  Scrape (JobSpy)  →  Filter + dedup  →  LLM parse + fit-score  →  [ HITL: verify skills ]         │
+   Indeed/LinkedIn/    stale / seen /      cheap model, per job        confirm · add context ·      │
+   Glassdoor           company cooldown                                remove                       │
+                                                                            │                       │
+                                                                            ▼                       │
+        deliver .docx / PDF  ←  [ HITL: approve resume ]  ←  LLM tailor resume  ←  skill evidence ───┘
+              + log                approve · edit · skip      premium model         injected from graph
 ```
+
+**Provider-agnostic LLM layer.** Every model call goes through an `AIProvider` interface (`ai/base.py`) built by a factory from env vars (`ai/factory.py`). Providers implemented: Anthropic, OpenAI, Gemini, Groq, DeepSeek, Grok (xAI), Ollama. Calls are routed across three tiers so cost tracks stakes:
+- **Fast** (bulk, cheap) — parse every scraped job, score fit, expand role titles.
+- **Quality** (high-stakes) — tailor the resume that actually goes out, write cover letters, answer screening questions.
+- **Fallback** — a second quality provider, used automatically when the primary errors.
+
+Swapping any slot is one line in `.env` — no code change. This exists because provider cost, latency, and availability move constantly; being able to arbitrage them (and survive one going down) matters more than betting on a single vendor.
+
+**Retrieval → generation.** Confirmed skills and your own words about them are persisted as a structured **skill graph** (`SkillNode` + `SkillEvidence`). On each new job, the relevant evidence is retrieved and injected into the resume prompt — you explain "Kafka at Acme, 8 months, async order pipeline" once, and every future Kafka job reuses it. It's retrieval-augmented generation grounded in your own verified experience.
+
+**Guardrails & observability — what gets checked before output ships.**
+- **Anti-hallucination:** degree, dates, and GPA are extracted once and injected as a locked `<facts>` block into every tailoring call, so the model can't invent them; global "humanization" rules strip AI tells (em-dashes, buzzwords).
+- **Scraper health checks:** per-board result counts are recorded every run; a `/health` command shows each board's status, and you get a DM if a board returns nothing 3 scrapes in a row (a real IP block looks exactly like "no results" otherwise).
+- **Schema self-reconciliation:** on boot, any model column missing from the live DB is added automatically — a class of silent write-failure bug (see below) can't recur.
+
+**How the agent takes actions:** a typed tool layer in Python — the JobSpy scraper, the `.docx`/PDF renderers, and per-board scraping adapters, each a narrow surface the pipeline calls to do real work.
 
 ---
 
-## Quick Start
+## Tech stack
 
-### Prerequisites
-- Python 3.11+
-- A Telegram bot token from [@BotFather](https://t.me/BotFather)
-- At least one AI provider API key (Groq is free and fast)
+Honest to the repo (`requirements.txt`):
 
-### 1. Clone & install
+- **Language/runtime:** Python 3.11, fully async.
+- **Interface:** `python-telegram-bot` (long-polling — no web server exposed).
+- **Data:** SQLAlchemy async + **SQLite** (`aiosqlite`), Alembic migrations.
+- **LLMs:** Anthropic · OpenAI · Gemini · Groq · DeepSeek · Grok · Ollama, behind one interface.
+- **Scraping:** JobSpy (`python-jobspy`) + a `curl-cffi` patch for Glassdoor's Cloudflare/geo-redirect.
+- **Scheduling:** APScheduler (embedded in the bot process).
+- **Resume output:** `python-docx` (ATS-controlled `.docx`, primary) + `reportlab` (PDF on request).
+- **Ops:** Docker · **Litestream** (streams SQLite to OCI Object Storage for disaster recovery) · GitHub Actions CI/CD · OCI Ampere A1 (Always-Free).
+
+---
+
+## How LLMs fail here
+
+For several days, **every scraped job scored 0% fit**, with fluent, confident reasoning like *"candidate has no skills listed; all required skills are missing — very poor fit."*
+
+That output is the trap: it is **indistinguishable from a correct low-fit verdict.** The model wasn't broken. It was faithfully scoring an input that had silently gone empty. Two bugs were compounding underneath:
+
+1. Editing filters ran an onboarding-save path that **wiped the entire skill graph** (a SQLAlchemy in-place-JSON mutation that never persisted, plus a save with an empty skill list). The model was reasoning over a candidate with zero skills.
+2. **Every job INSERT was failing** on a DB column the model had but the deployed table didn't — so the "0% jobs" I kept inspecting were actually error tracebacks, not saved results.
+
+The lesson that shaped the rest of the system: **plausible LLM output is the most dangerous failure mode.** A crash gets caught; a confident, well-reasoned wrong answer sails straight through, because nothing *looks* wrong. You cannot eval your way out of this at the model layer — the model was correct. You need observability into the model's **inputs and the pipeline around it.**
+
+What changed as a direct result: the scraper **health checks + alerts** (is data even arriving?), the **schema self-reconciliation** on boot (so a missing column can't silently kill every write again), and leaning harder on the **human-in-the-loop gates** — the skill-verify step surfaces the exact profile the model is about to reason over, so an empty one is visible to a human before it ever reaches scoring.
+
+---
+
+## Setup
+
+**Prerequisites:** Python 3.11+, a Telegram bot token from [@BotFather](https://t.me/BotFather), and at least one AI provider key.
 
 ```bash
 git clone https://github.com/yourname/hireloop.git
 cd hireloop
-python -m venv venv
-source venv/bin/activate        # Windows: venv\Scripts\activate
+python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -r requirements.txt
+cp .env.example .env        # then edit — minimum below
 ```
-
-### 2. Configure
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env` — minimum required:
 
 ```env
-TELEGRAM_BOT_TOKEN=your_token_from_botfather
-AI_FAST_PROVIDER=groq
-AI_FAST_API_KEY=your_groq_key
-AI_QUALITY_PROVIDER=anthropic
-AI_QUALITY_API_KEY=your_anthropic_key
+TELEGRAM_BOT_TOKEN=from_botfather
+AI_FAST_PROVIDER=deepseek                 # bulk/cheap: parse + score
+AI_FAST_API_KEY=your_key
+AI_QUALITY_PROVIDER=anthropic             # high-stakes: the resume that ships
+AI_QUALITY_API_KEY=your_key
+AI_FALLBACK_PROVIDER=grok                 # optional quality backup
+AI_FALLBACK_API_KEY=your_key
 DATABASE_URL=sqlite:///hireloop.db
+ALLOWED_TELEGRAM_IDS=                     # comma-separated IDs; blank = open
 ```
-
-### 3. Run
 
 ```bash
 python bot/main.py
 ```
 
-The bot will create the database schema on first run. Open Telegram, find your bot, and send `/start`.
+The schema is created on first run. Open Telegram, find your bot, send `/start`. Any provider slot swaps with a one-line `.env` change (defaults: `deepseek-chat`, `claude-sonnet-4-6`, `grok-3-fast`). Deploy notes and internals live in [`CLAUDE.md`](CLAUDE.md).
 
 ---
 
-## Configuration Reference
+## Design decisions
 
-```env
-# ── AI — Fast provider (high volume: parse jobs, score fit) ──────────────────
-AI_FAST_PROVIDER=deepseek                  # deepseek | groq | openai | gemini | ollama
-AI_FAST_API_KEY=your_key
-AI_FAST_MODEL=                             # blank = deepseek-chat (DeepSeek V3)
-
-# ── AI — Quality provider (high stakes: resume, cover letter) ────────────────
-AI_QUALITY_PROVIDER=anthropic
-AI_QUALITY_API_KEY=your_key
-AI_QUALITY_MODEL=                          # blank = claude-sonnet-4-6
-
-# ── AI — Fallback (used when quality provider fails) ─────────────────────────
-AI_FALLBACK_PROVIDER=grok                  # leave blank to disable fallback
-AI_FALLBACK_API_KEY=your_key
-AI_FALLBACK_MODEL=                         # blank = grok-3-fast
-
-# ── Telegram ─────────────────────────────────────────────────────────────────
-TELEGRAM_BOT_TOKEN=from_botfather
-ALLOWED_TELEGRAM_IDS=                      # comma-separated IDs/usernames, blank = open
-
-# ── Database ─────────────────────────────────────────────────────────────────
-DATABASE_URL=sqlite:///hireloop.db         # swap to postgresql+asyncpg://... for prod
-
-# ── Optional ─────────────────────────────────────────────────────────────────
-OLLAMA_HOST=http://localhost:11434         # local Ollama instance
-```
-
-### Provider Defaults
-
-| Provider | Default Model | Speed | Cost | Role |
-|---|---|---|---|---|
-| `deepseek` | `deepseek-chat` (V3) | Fast | ~$0.14/M input | Fast (default) |
-| `anthropic` | `claude-sonnet-4-6` | Fast | ~$3/M input | Quality (default) |
-| `grok` / `xai` | `grok-3-fast` | Fast | ~$0.20/M input | Fallback (default) |
-| `groq` | `llama-3.3-70b-versatile` | Very fast | Free tier | Legacy fast |
-| `openai` | `gpt-4o` | Fast | ~$2.50/M input | Any slot |
-| `gemini` | `gemini-2.0-flash` | Fast | Free tier | Any slot |
-| `ollama` | `llama3.2` | Hardware | Free (local) | Any slot |
+- **Human-in-the-loop over full autonomy.** The gates aren't a limitation, they're the point: this resume represents *me*. The agent does everything up to the decision, then a human signs off. It also makes failures debuggable — the skill-verify gate is where the "0% fit" bug above becomes visible.
+- **Provider-agnostic + tiered routing.** A cheap model runs 50+ times a day (parse, score); a premium model runs only on the artifact that actually ships. Cost tracks stakes, and a fallback provider means one vendor outage doesn't stop the pipeline.
+- **SQLite + Litestream.** A full relational store with a durable backup and no database server to run: $0 to host for a single operator, streamed to object storage every few minutes for disaster recovery. The schema stays portable if it ever needs to scale to many users.
+- **Resume as Markdown, rendered on demand.** The tailored resume is stored as Markdown (LLM-native, tiny in the DB) and rendered to `.docx`/PDF only when requested — `python-docx` (not pandoc) so ATS-critical styles are controlled exactly and Markdown tables never become Word tables.
 
 ---
 
-## AI Task → Provider Routing
-
-```
-parse_resume()               →  FAST    (one-time extraction, not quality-critical)
-parse_job()                  →  FAST    (runs on every scraped job, 50+/day)
-expand_role_titles()         →  FAST    (runs once per user, cached 24h in user.filters)
-                                        ↑ "AI Engineer" → ["ML Engineer", "LLM Developer", ...]
-analyze_fit()                →  FAST    (runs per job above salary threshold)
-                                        ↑ cached — same resume+job = no repeat call
-
-tailor_resume()              →  QUALITY (goes on your actual resume — must be best)
-write_cover_letter()         →  QUALITY (represents you to recruiters)
-answer_screening_questions() →  QUALITY (high-stakes interview gating)
-```
-
-The cache layer (`ai/cache.py`) stores results keyed by SHA-256 of the input. If you re-analyze the same resume or job posting, the AI is not called again.
-
----
-
-## Skill Graph
-
-The skill graph is the heart of HireLoop. Every skill has a **node** (name, status, confidence) and optional **evidence** (where you used it, for how long, in your own words).
-
-### Skill Statuses
-
-| Status | Meaning | Color in report |
-|---|---|---|
-| `verified_attested` | You confirmed it and gave context | Green |
-| `verified_resume` | Extracted from your resume, auto-confirmed | Blue |
-| `partial` | Mentioned but no evidence | Amber |
-| `gap` | Required by a job, missing from your profile | Red |
-
-### Confidence Levels
-
-| Level | Source |
-|---|---|
-| `high` | AI found strong resume evidence → auto-confirmed |
-| `medium` | AI found some signals → you verify one-by-one |
-| `low` | Weak signal → you verify one-by-one |
-
-### Evidence Travels Automatically
-
-Once you confirm a skill with context, that evidence is reused forever:
-
-```
-You confirm: "Kafka at Acme Corp, 8 months, async order processing"
-
-     ↓ saved as ↓
-
-SkillNode(skill_name="Apache Kafka", status="verified_attested")
-SkillEvidence(company="Acme Corp", duration_months=8,
-              user_context="built async order processing pipeline")
-
-     ↓ next Kafka job ↓
-
-Resume bullet auto-generated:
-"Designed Kafka-based event pipeline for order processing at Acme Corp (8 months)"
-```
-
-You never explain the same skill twice.
-
-### Skill Deduplication
-
-Synonymous skills are normalized before storage:
-
-```
-"Drupal CMS"  →  key: "drupal"   ┐
-"Drupal"      →  key: "drupal"   ┘  merged, highest confidence kept
-
-"Vue.js"      →  key: "vue"      ┐
-"Vue JS"      →  key: "vue"      ┘  merged
-
-"Node JS"     →  key: "node"
-"React.js"    →  key: "react"
-```
-
-Stripped suffixes: `cms`, `framework`, `db`, `database`, `server`, `sdk`, `api`, `platform`, `library`, `.js`, ` js`
-
----
-
-## Bot Commands
-
-Register these with [@BotFather](https://t.me/BotFather) (`/setcommands`):
-
-```
-start        - Onboarding wizard (or re-run to update profile)
-addskills    - Add new skills or upload an updated resume
-skills       - View your skill graph (HTML report)
-instructions - Set standing instructions applied to every resume
-settings     - View all preferences
-filters      - Edit job filters
-timezone     - Set your timezone for scheduled scrapes
-pause        - Pause or resume job hunting
-deleteskill  - Remove a skill by name
-fetchnow     - Trigger an immediate job scrape
-myapps       - View last 10 applications + re-download files
-menu         - Refresh the keyboard (useful after bot restarts)
-cancel       - Cancel current operation
-help         - Full command list
-```
-
-### Persistent Keyboard
-
-Always visible at the bottom of the chat:
-
-```
-┌──────────────────┬──────────────────┐
-│  📎 Add Resume   │  🎛️ Edit Filters  │
-├──────────────────┼──────────────────┤
-│  📊 My Skills    │  📋 Pending Jobs  │
-├──────────────────┼──────────────────┤
-│  🔍 Fetch Jobs   │  ⚙️ Settings      │
-└──────────────────┴──────────────────┘
-│        ⏸ Pause Agent                │
-└──────────────────────────────────────┘
-```
-
----
-
-## Onboarding Flow (`/start`)
-
-```
-WELCOME
-  └─ [Let's go ✅]
-
-UPLOAD_RESUME
-  └─ Send 1–4 PDF or DOCX resumes
-  └─ [Done uploading ✅]
-       │
-       ├─ AI extracts all skills
-       ├─ Deduplication (normalize → merge highest confidence)
-       └─ High confidence → auto-confirmed
-          Medium/Low → one-by-one verify:
-
-CONFIRM_SKILLS (per skill)
-  ├─ [✅ Confirm]       → status: verified_resume
-  ├─ [✏️ Add context]   → ask for one sentence → status: verified_attested
-  └─ [❌ Remove]        → skip this skill
-
-SET_FILTERS
-  └─ Role titles (comma-separated, e.g. "Software Engineer, AI Engineer")
-  └─ Remote preference (remote / hybrid / on-site / any)
-  └─ Country (sets regional job board)
-  └─ City / Region (or skip for nationwide)
-  └─ Job boards (Indeed, LinkedIn, Glassdoor, Google, ZipRecruiter)
-  └─ Min salary
-  └─ Blacklist companies
-
-SET_FREQUENCY
-  └─ [📬 Daily digest] [2x per day]
-  └─ Min fit score: [50%] [60%] [70%] [80%]
-
-DONE
-  └─ Profile saved, keyboard activated
-```
-
-**Returning users** (`/start` when already onboarded) get a menu:
-- `🎛️ Update filters` — re-run filter setup only
-- `➕ Add more skills` — directs to `/addskills`
-- `📎 Re-upload resume` — full re-onboarding (replaces skill graph)
-- `❌ Nothing, cancel`
-
----
-
-## Adding Skills Post-Onboarding (`/addskills`)
-
-Triggered by `/addskills` or the `📎 Add Resume` keyboard button. **Never wipes existing skills.**
-
-### Path A — Upload resume
-
-```
-Upload 1–4 resumes
-  └─ AI extracts skills
-  └─ Dedup against existing graph:
-       Already have? → skipped (no duplicate nodes)
-       New skill?    → high confidence = auto-merged
-                       medium/low = ask to verify
-  └─ Merge into graph (add new nodes, upgrade confidence/status if better)
-```
-
-### Path B — Add manually
-
-```
-Type skill name (e.g. "Kubernetes")
-  └─ Add one-line context? (or type "skip")
-  └─ Saved as verified_attested
-  └─ Type another skill name, or /cancel to stop
-```
-
-### Merge rules
-
-| Condition | Result |
-|---|---|
-| New skill | `SkillNode` + `SkillEvidence` inserted |
-| Skill exists, new confidence is higher | Confidence upgraded |
-| Skill exists, new status is higher (partial → verified) | Status upgraded |
-| Skill exists, new evidence provided | Evidence appended (old preserved) |
-
----
-
-## Skill Graph Report (`/skills`)
-
-Sends a live HTML file that opens in any browser:
-
-- Color-coded badge pills per status (green / blue / amber / red)
-- Confidence indicator per skill (●●● / ●●○ / ●○○)
-- Evidence snippet shown on each pill (first 120 chars)
-- Header stats: Total / Verified / Have / Gaps
-- Generated from the database — zero AI calls, instant
-
----
-
-## Job Notification Card
-
-```
-🏢 Senior Backend Engineer
-Acme Corp · Toronto, ON · $120k–$150k
-
-Fit Score: 84% · Strong match
-
-✅ Matched: Python, FastAPI, PostgreSQL, Redis
-❓ Gaps:    Kafka (required), Temporal (preferred)
-
-[✅ I know these]  [⏭ Skip]  [📄 Full JD]  [🔗 Open Link]
-```
-
-Tapping `📄 Full JD` sends the raw job description as a follow-up message (does not replace the card).
-
-After confirming skills → fit score recalculated → resume generation begins.
-
----
-
-## Resume Generation + Format Delivery
-
-### Storage Strategy
-
-The tailored resume is stored as **Markdown text** in the DB (`resume_markdown TEXT` per application). Binary files are rendered on-demand when you request them — keeping the DB small and the content LLM-friendly.
-
-```
-tailor_resume() → Markdown (stored in DB)
-                       ↓
-        [📄 Word Doc]   [📋 PDF]   [Both]
-              ↓               ↓
-      docx_export.py    pdf_export.py
-    (python-docx)       (reportlab)
-```
-
-### Format Choice
-
-| Format | Tool | Why |
-|---|---|---|
-| `.docx` (primary) | `python-docx` | Full style control — forces exact Heading/ListBullet styles ATS parsers recognize; no surprise tables |
-| `.pdf` (on request) | `reportlab` | Fixed layout for email attachments |
-
-### Smart Section Order
-
-Section order is inferred from the user's parsed resume — no onboarding questions, zero AI tokens for 85% of cases.
-
-**4 signals, all derived from existing data:**
-
-| Signal | Source | Cost |
-|---|---|---|
-| `years_exp` | Sum of `duration_months` from `parse_resume()` | 0 tokens |
-| `graduation_year` | Education section from `parse_resume()` | 0 tokens |
-| `has_strong_projects` | Project count from `parse_resume()` | 0 tokens |
-| `is_career_changer` | Domain match: past titles vs target role | 0 tokens |
-
-**`is_career_changer` logic** — no API call, no user question:
-```
-is_career_changer = (
-    domain_mismatch(past_titles, target_role)   ← keyword set comparison
-    AND years_exp >= 2                           ← rules out freshers with part-time jobs
-    AND any(duration_months >= 6 per role)       ← rules out short gigs
-)
-```
-
-**Decision tree (`resume/section_order.py`):**
-```
-Fresher (years_exp < 2 or no full-time role):
-  education → projects → skills → experience
-
-Career changer (domain mismatch + years_exp ≥ 2 + full-time role):
-  summary → skills → experience → education
-
-Experienced (domain match + years_exp ≥ 2):
-  summary → experience → skills → education [+ projects if strong]
-```
-
-Groq fallback (~70 tokens) only for true edge cases. Stored in `user.filters["resume_section_order"]`. Auto-updated on every new resume upload. Changeable anytime via `/settings → Resume preferences`.
-
-### ATS Parsability Rules
-
-All generated resumes enforce:
-- **Single column** — no multi-column layouts
-- **No tables for structure** — bullets only (tables confuse ATS parsers)
-- **No text boxes, headers/footers** for important content
-- **Standard section names**: `Work Experience`, `Education`, `Skills`, `Summary`
-- **Standard fonts**: Arial / Calibri — no decorative fonts
-- **Explicit heading styles** — `python-docx` `add_heading(level=1)` maps to `"Heading 1"` style, recognized by Workday, Greenhouse, Lever, LinkedIn, Indeed
-
-`python-docx` used instead of pypandoc — pypandoc converts Markdown tables → Word tables (ATS killer). `python-docx` gives direct control over every element.
-
----
-
-## Cover Letter Logic
-
-A cover letter is generated **only when**:
-
-1. The job description explicitly mentions one (`"cover letter"`, `"covering letter"`, `"letter of motivation"`, `"please include"`)
-2. The user taps `[📝 Add Cover Letter]` on the approval screen
-
-It is **never auto-generated** for every application.
-
----
-
-## Project Structure
-
-```
-hireloop/
-├── .env.example
-├── requirements.txt
-├── docker-compose.yml
-│
-├── ai/
-│   ├── base.py                    # Abstract AIProvider class
-│   ├── factory.py                 # AIFactory.create_fast() / create_quality()
-│   ├── service.py                 # HireLoopAI — 6 task methods, tiered routing
-│   ├── cache.py                   # SHA-256 in-memory response cache
-│   └── providers/
-│       ├── anthropic_provider.py
-│       ├── openai_provider.py
-│       ├── gemini_provider.py
-│       ├── groq_provider.py
-│       └── ollama_provider.py
-│
-├── alembic/
-│   ├── env.py
-│   └── versions/                  # Migration files
-│
-├── db/
-│   ├── models.py                  # User · SkillNode · SkillEvidence · Job · Application
-│   └── session.py                 # AsyncSessionLocal + engine
-│
-├── bot/
-│   ├── main.py                    # Entry point, handler registration
-│   ├── onboarding.py              # /start ConversationHandler (12 states)
-│   ├── keyboards.py               # All InlineKeyboardMarkup builders
-│   └── handlers/
-│       ├── add_skills.py          # /addskills ConversationHandler (6 states)
-│       ├── settings.py            # /skills /settings /filters /pause /help /deleteskill /instructions
-│       ├── skill_verify.py        # (Week 3) job skill confirmation
-│       ├── job_approval.py        # (Week 4) resume approve/edit/skip
-│       └── resume_upload.py       # (Week 4) resume generation
-│
-├── jobs/
-│   ├── scraper.py                 # JobSpy wrapper
-│   ├── glassdoor_patch.py         # curl_cffi patch — fixes Canadian IP geo-redirect + Cloudflare 403
-│   ├── parser.py                  # Jina Reader for pasted URLs
-│   ├── filters.py                 # salary / blacklist / seniority / dedup filters
-│   └── scheduler.py               # APScheduler AsyncIOScheduler
-│
-├── resume/
-│   ├── generator.py               # (Week 4) tailor_resume() → store Markdown in DB
-│   ├── section_order.py           # (Week 4) infer section order from profile, zero tokens
-│   ├── docx_export.py             # (Week 4) Markdown → .docx via python-docx (ATS-safe)
-│   ├── pdf_export.py              # (Week 4) Markdown → PDF via reportlab ✅ ready
-│   ├── variants/                  # Your base resume markdown files
-│   └── output/                    # Generated files (gitignored)
-│
-└── scripts/
-    ├── test_provider.py           # AI provider smoke test (fast + quality)
-    └── run_scrape.py              # Standalone scrape — full pipeline without the bot
-```
-
----
-
-## Adding a New AI Provider
-
-1. Create `ai/providers/myprovider.py`
-
-```python
-from ai.base import AIProvider
-
-class MyProvider(AIProvider):
-    @property
-    def provider_name(self) -> str:
-        return "myprovider"
-
-    async def complete(self, prompt: str, system: str = "") -> str:
-        # call your API here
-        ...
-```
-
-2. Add it to `AIFactory._build()` in `ai/factory.py`:
-
-```python
-case "myprovider":
-    from ai.providers.myprovider import MyProvider
-    return MyProvider(api_key=api_key, model=model or "my-default-model")
-```
-
-3. Add default model to `_DEFAULT_MODELS` in `factory.py`:
-
-```python
-"myprovider": "my-default-model",
-```
-
-4. Set in `.env`:
-```env
-AI_FAST_PROVIDER=myprovider
-AI_FAST_API_KEY=your_key
-```
-
----
-
-## Database Schema
-
-```
-users
-  id (UUID PK) · telegram_id · name · filters (JSON) · notify_freq
-  min_fit_score · daily_app_limit · onboarded · created_at
-  base_resume_markdown · resume_facts (JSON)
-  last_active (DateTime, nullable) · timezone (Text, default "America/Vancouver")
-
-skill_nodes
-  id · user_id (FK) · skill_name · status · confidence
-  created_at · updated_at
-
-skill_evidence
-  id · skill_node_id (FK) · company · role_title · duration_months
-  last_used_year · user_context · generated_bullet · source
-
-jobs
-  id (UUID PK) · user_id (FK) · title · company · url · url_hash
-  raw_jd · parsed (JSON) · fit_score · cover_letter_required
-  recruiter_name · recruiter_linkedin · status · created_at
-
-applications
-  id · job_id (FK) · resume_markdown · cover_letter_markdown · applied_at
-  outcome · outcome_source · outcome_at
-```
-
-`url_hash` on `jobs` deduplicates scraped listings. `source` on `skill_evidence` is `resume | telegram | manual`.
-
----
-
-## Roadmap
-
-### Phase 1 — Foundation + Telegram (current)
-- [x] AI provider abstraction + all 5 providers
-- [x] Tiered routing (fast / quality)
-- [x] In-memory cache
-- [x] SQLAlchemy async schema
-- [x] Telegram onboarding wizard (12 states)
-- [x] Skill graph (nodes + evidence)
-- [x] Skill deduplication + normalization
-- [x] Post-onboarding skill management (/addskills)
-- [x] HTML skill graph report (/skills)
-- [~] Job scraper (JobSpy — Indeed, LinkedIn, Glassdoor, Google) — testing in progress
-- [x] AI role title expansion (expand_role_titles, cached 24h)
-- [x] URL-hash + semantic (title+company) dedup
-- [x] Company cooldown dedup (≥2 jobs/company in 7 days → skip repeat-posting spam)
-- [x] URL-paste ingestion (Jina Reader)
-- [x] Fit scoring notification cards
-- [x] Background analysis with completion summary
-- [x] Skill verification dialog
-- [x] APScheduler hourly tick (Mon–Fri), fires at 08:00 + 18:00 per user timezone
-- [x] Per-user timezone setting (/timezone)
-- [x] Weekday-only inactivity detection (>3 business days → auto-pause + warning)
-- [x] /fetchnow — instant on-demand scrape
-- [x] Auto-purge stale jobs after 10 days
-- [x] PDF export (reportlab) — resume/pdf_export.py (render layer ready)
-- [x] Resume generator — resume/generator.py (AI tailoring → store Markdown in DB)
-- [x] Word (.docx) export — resume/docx_export.py via python-docx (ATS-safe)
-- [x] Smart section order — resume/section_order.py (pure Python decision tree, zero tokens)
-- [x] is_career_changer inference (domain match + years_exp + full-time role check)
-- [x] ATS-safe constraints: single-col, no tables/text-boxes, standard section names
-- [x] Job approval screen — [📄 Word] [📋 PDF] [Both] [⏭ Skip]
-- [x] Cover letter generation (on request only)
-- [x] Application logging to DB + /myapps history with re-download
-- [x] Post-delivery resume edit loop (AI patch → re-send updated file)
-- [x] Skill evidence date follow-up (regex date detection, asks when absent)
-- [x] Standing resume instructions (/instructions → stored in user.filters)
-- [x] Experience filtering (max 4 work entries, drop >10 yr unless required skill)
-- [x] Input length caps on all AI-facing user text (two-layer: handler + service.py)
-- [x] Work experience curation — CORE/RELEVANT/MARGINAL/CUT tiers, KEEP TEST, CUT LIST
-- [x] Matched skills from fit analysis injected into resume AI prompt
-- [x] Omitted role accountability — AI reports every dropped role, bot surfaces it to user
-- [x] Humanization — WRITING STYLE rules ban em dashes + AI buzzwords across all system prompts
-- [x] Ground-truth facts — `resume_facts` extracted at upload, injected as locked `<facts>` block into every `tailor_resume()` call to prevent hallucination of dates/degrees/GPA
-
-### Hosting
-- [x] OCI Ampere A1 (ARM64, Always Free) — 4 vCPU, 24 GB RAM, $0/month
-- [x] Docker + Litestream — SQLite replicated to OCI Object Storage every 5s
-- [x] systemd auto-boot — bot restarts on server reboot
-- [x] GitHub Actions CI/CD — push to main → auto-deploys via SSH
-
-### Next Steps
-- [ ] Self-hosted LLM — Ollama on same OCI instance for zero-cost quality inference
-
-### Phase 2 — Multi-user + Intelligence
-- [ ] Recruiter finder (3-tier: JD parse → LinkedIn → web search)
-- [ ] Application rate limiter (daily cap, 30-day company cooldown)
-- [ ] Outcome tracking (interview / rejected / ghosted / offer)
-- [ ] Salary intel before fit scoring
-- [ ] Postgres migration
-
-### Phase 3 — Automation
-- [ ] Auto-apply via Playwright (Workday / Greenhouse / Lever)
-- [ ] ATS platform classifier
-- [ ] Screenshot proof of submission
-- [ ] Gmail integration for outcome loop
-- [ ] Web dashboard (Next.js)
-- [ ] Supabase multi-tenant auth
-- [ ] Embedding-based fit scoring (sentence-transformers, cosine similarity) — low priority
-
----
-
-## Running Tests
-
-```bash
-# AI provider smoke test — verifies fast + quality providers respond correctly
-python scripts/test_provider.py
-
-# Standalone scrape — full pipeline without the bot (auto-detects first onboarded user)
-python scripts/run_scrape.py
-
-# Syntax check all modules
-python -m py_compile bot/main.py bot/onboarding.py \
-  bot/handlers/add_skills.py bot/handlers/settings.py \
-  ai/service.py ai/factory.py db/models.py
-```
-
-Resume generation is tested through the live bot — approve a job card, generate, edit, and download DOCX directly in Telegram.
-
----
-
-## Docker
-
-```bash
-docker-compose up -d
-```
-
-The compose file runs the bot process + volume-mounts the SQLite DB and resume output directory.
-
----
-
-## Security Notes
-
-- Never commit `.env` — it's in `.gitignore`
-- Set `ALLOWED_TELEGRAM_IDS` to restrict access to your own Telegram user ID
-- All user-supplied text is HTML-escaped before being sent back through Telegram (no Markdown injection)
-- User-supplied text passed to AI is capped: skill evidence 400 chars, standing instructions and edit requests 600 chars each; `service.py` applies a second silent truncation as defence-in-depth
-- No external web server is exposed — the bot uses Telegram's long-polling
+## Roadmap & known limitations
+
+**Planned**
+- Embedding / vector-based fit scoring (semantic RAG over the skill graph).
+- Multi-user support (Postgres migration — the schema is already portable).
+- Auto-apply via Playwright (Workday / Greenhouse / Lever) with screenshot proof.
+- Recruiter finder, Gmail outcome loop, and a web dashboard.
+
+**Known limitations (honest)**
+- Scraping depends on boards that tolerate a datacenter IP; LinkedIn is flaky, Google Jobs is skipped, Indeed/Glassdoor are the reliable ones.
+- Single-user by design — no auth/multi-tenancy yet.
+- No formal eval harness yet; correctness relies on the guardrails and human gates above.
 
 ---
 
 ## License
 
-MIT — do whatever you want, but don't blame us if your resume gets too good.
+MIT — do whatever you want, but don't blame me if your resume gets too good.

@@ -91,6 +91,20 @@ class Job(Base):
     application           = relationship("Application", back_populates="job", uselist=False)
 
 
+class ScrapeRun(Base):
+    """One row per scrape (manual or scheduled). Powers /health and the
+    per-board 'returned nothing for N scrapes' alert."""
+    __tablename__ = "scrape_runs"
+
+    id          = Column(Integer, primary_key=True, autoincrement=True)
+    user_id     = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    started_at  = Column(DateTime, default=datetime.utcnow, index=True)
+    is_manual   = Column(Boolean, default=False)
+    # {"indeed": {"results": 67, "errors": 0}, "linkedin": {...}, "glassdoor": {...}}
+    per_site    = Column(JSON)
+    total_raw   = Column(Integer, default=0)
+
+
 class Application(Base):
     __tablename__ = "applications"
 
