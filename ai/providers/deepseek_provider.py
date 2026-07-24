@@ -4,7 +4,7 @@ import time
 from openai import AsyncOpenAI
 from ai.base import AIProvider
 
-_DEFAULT_MODEL = "deepseek-chat"
+_DEFAULT_MODEL = "deepseek-v4-flash"
 _BASE_URL = "https://api.deepseek.com"
 logger = logging.getLogger(__name__)
 

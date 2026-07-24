@@ -567,10 +567,71 @@ async def _do_save_globally(context, include_roles: bool) -> None:
     )
 
 
+# ── Paginated list helpers (shared by /myapps and /saved) ─────────────────────
+
+_PAGE_SIZE   = 10
+_LIST_CAP    = 100   # most-recent N kept in memory; paged 10 at a time
+
+_MYAPPS_HINTS = [
+    "Type a number to get files:",
+    "  1 → Word · 1p → PDF · 1c → Cover letter · 1j → Full JD",
+    "",
+    "'next' / 'prev' to page · /cancel to exit.",
+]
+_SAVED_HINTS = [
+    "Type a number to see the full JD · Nr (e.g. 1r) to generate a resume.",
+    "",
+    "'next' / 'prev' to page · /cancel to exit.",
+]
+
+
+def _render_list_page(header: str, item_lines: list[str], hints: list[str], offset: int) -> tuple[str, int]:
+    """Build one page of a numbered list. item_lines are already absolute-numbered
+    ('1. ...'). Returns (message_text, clamped_offset)."""
+    total = len(item_lines)
+    if total == 0:
+        return header, 0
+    max_offset = ((total - 1) // _PAGE_SIZE) * _PAGE_SIZE
+    offset = max(0, min(offset, max_offset))
+    window = item_lines[offset:offset + _PAGE_SIZE]
+    start, end = offset + 1, offset + len(window)
+
+    lines = [header, ""] + window + [""]
+    if total > _PAGE_SIZE:
+        lines.append(f"Showing {start}–{end} of {total}.")
+        nav = []
+        if end < total:
+            nav.append("→ 'next'")
+        if offset > 0:
+            nav.append("'prev' ←")
+        if nav:
+            lines.append("   ".join(nav))
+        lines.append("")
+    lines += hints
+    return "\n".join(lines), offset
+
+
+def _handle_page_nav(text: str, context, prefix: str, hints: list[str]) -> str | None:
+    """If `text` is a paging command, move the offset and return the re-rendered page.
+    Returns None if it's not a nav command (caller falls through to selection)."""
+    item_lines = context.user_data.get(f"{prefix}_lines")
+    if item_lines is None:
+        return None
+    if text in ("next", "n", ">", "more"):
+        off = context.user_data.get(f"{prefix}_offset", 0) + _PAGE_SIZE
+    elif text in ("prev", "p", "<", "back"):
+        off = context.user_data.get(f"{prefix}_offset", 0) - _PAGE_SIZE
+    else:
+        return None
+    msg, off = _render_list_page(context.user_data.get(f"{prefix}_header", ""), item_lines, hints, off)
+    context.user_data[f"{prefix}_offset"] = off
+    return msg
+
+
 # ── My Applications ───────────────────────────────────────────────────────────
 
 async def cmd_my_applications(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Single-message list of last 10 applications. Enters MYAPPS_PICK state."""
+    """Paginated single-message list of applications. Enters MYAPPS_PICK state."""
     from sqlalchemy import select
     from db.models import User
 
@@ -590,7 +651,7 @@ async def cmd_my_applications(update: Update, context: ContextTypes.DEFAULT_TYPE
             .join(Job, Application.job_id == Job.id)
             .where(Job.user_id == user.id)
             .order_by(Application.applied_at.desc())
-            .limit(10)
+            .limit(_LIST_CAP)
         )
         rows = apps_result.all()
 
@@ -605,23 +666,18 @@ async def cmd_my_applications(update: Update, context: ContextTypes.DEFAULT_TYPE
         for app, job in rows
     ]
 
-    lines = [f"📁 Applications ({len(rows)})\n"]
+    item_lines = []
     for i, (app, job) in enumerate(rows, 1):
         fit_score = int(job.fit_score or (job.parsed or {}).get("_fit", {}).get("fit_score", 0) or 0)
         date_str  = f"{app.applied_at.strftime('%b')} {app.applied_at.day}" if app.applied_at else "—"
-        lines.append(f"{i}. {job.title or '?'} @ {job.company or '?'} — {date_str} · {fit_score}%")
+        item_lines.append(f"{i}. {job.title or '?'} @ {job.company or '?'} — {date_str} · {fit_score}%")
 
-    lines += [
-        "",
-        "Type a number to get files.",
-        "  1   → Word (.docx)",
-        "  1p  → PDF",
-        "  1c  → Cover letter (if available)",
-        "  1j  → Full Job Description",
-        "",
-        "/cancel to exit.",
-    ]
-    await update.message.reply_text("\n".join(lines))
+    header = f"📁 Applications ({len(rows)})"
+    context.user_data["myapps_header"] = header
+    context.user_data["myapps_lines"]  = item_lines
+    text, off = _render_list_page(header, item_lines, _MYAPPS_HINTS, 0)
+    context.user_data["myapps_offset"] = off
+    await update.message.reply_text(text)
     return MYAPPS_PICK
 
 
@@ -630,6 +686,11 @@ async def myapps_pick_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     text = update.message.text.strip().lower()
     rows = context.user_data.get("myapps_rows", [])
     n    = len(rows)
+
+    nav = _handle_page_nav(text, context, "myapps", _MYAPPS_HINTS)
+    if nav is not None:
+        await update.message.reply_text(nav)
+        return MYAPPS_PICK
 
     m = re.match(r'^(\d+)([a-z]?)$', text)
     if not m:
@@ -728,7 +789,7 @@ async def cmd_saved_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             select(Job)
             .where(Job.user_id == user.id, Job.status == "saved")
             .order_by(Job.fit_score.desc().nullslast(), Job.created_at.desc())
-            .limit(10)
+            .limit(_LIST_CAP)
         )
         jobs = jobs_result.scalars().all()
 
@@ -740,20 +801,18 @@ async def cmd_saved_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     context.user_data["saved_jobs"] = [job.id for job in jobs]
 
-    lines = [f"💾 Saved Jobs ({len(jobs)})\n"]
+    item_lines = []
     for i, job in enumerate(jobs, 1):
         fit_score = int(job.fit_score or 0)
         date_str  = f"{job.created_at.strftime('%b')} {job.created_at.day}" if job.created_at else "—"
-        lines.append(f"{i}. {job.title or '?'} @ {job.company or '?'} · {fit_score}% fit · {date_str}")
+        item_lines.append(f"{i}. {job.title or '?'} @ {job.company or '?'} · {fit_score}% fit · {date_str}")
 
-    lines += [
-        "",
-        "Type a number to see the full JD.",
-        "Type  Nr  (e.g. 1r) to generate a resume for that job.",
-        "",
-        "/cancel to exit.",
-    ]
-    await update.message.reply_text("\n".join(lines))
+    header = f"💾 Saved Jobs ({len(jobs)})"
+    context.user_data["saved_header"] = header
+    context.user_data["saved_lines"]  = item_lines
+    text, off = _render_list_page(header, item_lines, _SAVED_HINTS, 0)
+    context.user_data["saved_offset"] = off
+    await update.message.reply_text(text)
     return SAVED_PICK
 
 
@@ -762,6 +821,11 @@ async def saved_pick_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     text      = update.message.text.strip().lower()
     job_ids   = context.user_data.get("saved_jobs", [])
     n         = len(job_ids)
+
+    nav = _handle_page_nav(text, context, "saved", _SAVED_HINTS)
+    if nav is not None:
+        await update.message.reply_text(nav)
+        return SAVED_PICK
 
     m = re.match(r'^(\d+)(r?)$', text)
     if not m:
