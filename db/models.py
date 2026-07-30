@@ -103,6 +103,8 @@ class ScrapeRun(Base):
     # {"indeed": {"results": 67, "errors": 0}, "linkedin": {...}, "glassdoor": {...}}
     per_site    = Column(JSON)
     total_raw   = Column(Integer, default=0)
+    ai_total    = Column(Integer, default=0)  # jobs sent to analyze_fit this run
+    ai_errors   = Column(Integer, default=0)  # of those, how many raised (provider outage, bad model, etc.)
 
 
 class Application(Base):

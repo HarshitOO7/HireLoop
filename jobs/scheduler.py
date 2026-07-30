@@ -203,11 +203,14 @@ async def _analyze_remaining(
     skill_tokens: set,
     ai,
     bot=None,
+    run_id: int | None = None,
 ) -> None:
     """Background task: analyze remaining batches, save to DB, then send a completion summary."""
     sem   = asyncio.Semaphore(2)   # reduced from 5 to avoid 429s
     BATCH = 5
     bg_qualifying: list[Job] = []
+    ai_total  = 0
+    ai_errors = 0
 
     async def _bg_one(raw) -> tuple:
         desc    = raw.get("description") or ""
@@ -230,11 +233,26 @@ async def _analyze_remaining(
         batch   = jobs[i:i + BATCH]
         results = await asyncio.gather(*[_bg_one(raw) for raw in batch])
         for result in results:
+            status = result[4]
+            if status in ("ok", "error"):
+                ai_total += 1
+                if status == "error":
+                    ai_errors += 1
             await _save_job_result(*result, user=user, qualifying=bg_qualifying)
         logger.info("[scheduler] background batch %d–%d / %d done",
                     i + 1, i + len(batch), len(jobs))
         if i + BATCH < len(jobs):
             await asyncio.sleep(2)   # breathing room between batches
+
+    if run_id is not None and ai_total:
+        async with AsyncSessionLocal() as session:
+            async with session.begin():
+                await session.execute(
+                    update(ScrapeRun).where(ScrapeRun.id == run_id).values(
+                        ai_total=ScrapeRun.ai_total + ai_total,
+                        ai_errors=ScrapeRun.ai_errors + ai_errors,
+                    )
+                )
 
     if bot:
         n_more = len(bg_qualifying)
@@ -245,6 +263,13 @@ async def _analyze_remaining(
                     f"✅ Analysis done — <b>{n_more} more job{'s' if n_more != 1 else ''}</b> matched. "
                     f"Tap 📋 Pending Jobs to continue."
                 ),
+                parse_mode="HTML",
+            )
+        elif ai_errors:
+            await bot.send_message(
+                chat_id=user.telegram_id,
+                text=(f"⚠️ AI provider failed on {ai_errors}/{ai_total} remaining job{'s' if ai_total != 1 else ''} — "
+                      "use /health for details."),
                 parse_mode="HTML",
             )
         else:
@@ -273,19 +298,23 @@ def _weekday_days_since(dt: datetime | None) -> int:
     return count
 
 
-async def _record_scrape_health(user, per_site: dict, total_raw: int, is_manual: bool, bot) -> None:
+async def _record_scrape_health(user, per_site: dict, total_raw: int, is_manual: bool, bot) -> int:
     """Persist one ScrapeRun and DM the user if a board JUST hit the miss threshold.
 
     Alerts fire once (streak == threshold exactly) and reset automatically when the
     board returns results again. The send is best-effort (blocked users are ignored).
+    Returns the new ScrapeRun's id so AI stats can be attached to it later.
     """
     sites = list(per_site.keys())
     async with AsyncSessionLocal() as session:
         async with session.begin():
-            session.add(ScrapeRun(
+            run = ScrapeRun(
                 user_id=user.id, started_at=datetime.utcnow(),
                 is_manual=is_manual, per_site=per_site, total_raw=total_raw,
-            ))
+            )
+            session.add(run)
+            await session.flush()
+            run_id = run.id
         result = await session.execute(
             select(ScrapeRun.per_site)
             .where(ScrapeRun.user_id == user.id)
@@ -316,13 +345,28 @@ async def _record_scrape_health(user, per_site: dict, total_raw: int, is_manual:
             except Exception as e:
                 logger.warning("[scheduler] health alert send failed user=%s: %s", user.telegram_id, e)
 
+    return run_id
+
+
+async def _record_ai_health(run_id: int | None, ai_total: int, ai_errors: int) -> None:
+    """Attach analyze_fit success/error counts to the ScrapeRun row created earlier this cycle."""
+    if run_id is None or ai_total == 0:
+        return
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            await session.execute(
+                update(ScrapeRun).where(ScrapeRun.id == run_id).values(
+                    ai_total=ai_total, ai_errors=ai_errors,
+                )
+            )
+
 
 async def _process_user(user: User, bot, ai, is_manual: bool = False) -> int:
     logger.info("[scheduler] processing user=%s", user.telegram_id)
 
     role_variants = await _get_role_variants(user, ai)
     raw_jobs, per_site = await scrape_for_user(user, role_variants=role_variants or None)
-    await _record_scrape_health(user, per_site, len(raw_jobs), is_manual, bot)
+    run_id = await _record_scrape_health(user, per_site, len(raw_jobs), is_manual, bot)
 
     if not raw_jobs:
         if is_manual:
@@ -394,6 +438,8 @@ async def _process_user(user: User, bot, ai, is_manual: bool = False) -> int:
     sem_fg     = asyncio.Semaphore(2)   # reduced to avoid 429s
     qualifying: list[Job] = []
     rest       = list(filtered)
+    ai_total   = 0
+    ai_errors  = 0
 
     while rest and not qualifying:
         batch = rest[:5]
@@ -401,20 +447,38 @@ async def _process_user(user: User, bot, ai, is_manual: bool = False) -> int:
         logger.info("[scheduler] foreground batch: %d jobs (%d remaining)", len(batch), len(rest))
         results = await asyncio.gather(*[_analyze_one(raw, sem_fg) for raw in batch])
         for result in results:
+            status = result[4]
+            if status in ("ok", "error"):
+                ai_total += 1
+                if status == "error":
+                    ai_errors += 1
             await _save_job_result(*result, user=user, qualifying=qualifying)
 
+    await _record_ai_health(run_id, ai_total, ai_errors)
+
     if not qualifying:
-        await bot.send_message(
-            chat_id=user.telegram_id,
-            text=f"No new jobs above your {user.min_fit_score}% threshold this time. Try 🎛️ Edit Filters to lower it.",
-        )
-        logger.info("[scheduler] no qualifying jobs for user=%s", user.telegram_id)
+        if ai_errors:
+            await bot.send_message(
+                chat_id=user.telegram_id,
+                text=(f"⚠️ AI provider failed on {ai_errors}/{ai_total} job{'s' if ai_total != 1 else ''} this run — "
+                      "fit couldn't be judged, so nothing was shown. This is a provider/config issue, not "
+                      "a lack of matches. Use /health for details."),
+                parse_mode="HTML",
+            )
+            logger.warning("[scheduler] AI errors this run user=%s — %d/%d failed",
+                            user.telegram_id, ai_errors, ai_total)
+        else:
+            await bot.send_message(
+                chat_id=user.telegram_id,
+                text=f"No new jobs above your {user.min_fit_score}% threshold this time. Try 🎛️ Edit Filters to lower it.",
+            )
+            logger.info("[scheduler] no qualifying jobs for user=%s", user.telegram_id)
         return 0
 
     # ── Fire background task for whatever is left ─────────────────────────────
     if rest:
         asyncio.create_task(
-            _analyze_remaining(rest, user, profile, skill_keywords, skill_tokens, ai, bot=bot)
+            _analyze_remaining(rest, user, profile, skill_keywords, skill_tokens, ai, bot=bot, run_id=run_id)
         )
 
     # ── Send first-batch summary + first card ─────────────────────────────────

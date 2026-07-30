@@ -266,7 +266,7 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Run /start first.")
             return
         runs = (await session.execute(
-            select(ScrapeRun.started_at, ScrapeRun.per_site)
+            select(ScrapeRun.started_at, ScrapeRun.per_site, ScrapeRun.ai_total, ScrapeRun.ai_errors)
             .where(ScrapeRun.user_id == user.id)
             .order_by(ScrapeRun.started_at.desc())
             .limit(20)
@@ -276,7 +276,7 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("No scrapes recorded yet. Tap 🔍 Fetch Jobs to run one.")
         return
 
-    last_at, last_per_site = runs[0]
+    last_at, last_per_site, last_ai_total, last_ai_errors = runs[0]
     last_per_site = last_per_site or {}
     sites = list(last_per_site.keys()) or ["indeed", "linkedin", "glassdoor"]
     when = f"{last_at.strftime('%b')} {last_at.day} {last_at.strftime('%H:%M')} UTC" if last_at else "—"
@@ -284,7 +284,7 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines = ["<b>Scraper Health</b>\n", f"Last scrape: {when}\n"]
     for site in sites:
         streak = 0
-        for _, ps in runs:
+        for _, ps, _, _ in runs:
             if ((ps or {}).get(site) or {}).get("results", 0) == 0:
                 streak += 1
             else:
@@ -300,6 +300,17 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if errors:
             note += f", {errors} error{'s' if errors != 1 else ''}"
         lines.append(f"{emoji} <b>{_e(site)}</b> — {_e(note)}")
+
+    last_ai_total = last_ai_total or 0
+    last_ai_errors = last_ai_errors or 0
+    if last_ai_total:
+        if last_ai_errors == 0:
+            ai_emoji, ai_note = "✅", f"{last_ai_total} job{'s' if last_ai_total != 1 else ''} analyzed, 0 errors"
+        elif last_ai_errors == last_ai_total:
+            ai_emoji, ai_note = "❌", f"all {last_ai_total} jobs failed (provider down or misconfigured)"
+        else:
+            ai_emoji, ai_note = "⚠️", f"{last_ai_errors}/{last_ai_total} jobs failed"
+        lines.append(f"\n{ai_emoji} <b>AI provider</b> — {_e(ai_note)}")
 
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
