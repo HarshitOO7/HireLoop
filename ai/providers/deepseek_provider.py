@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 class DeepSeekProvider(AIProvider):
     def __init__(self, api_key: str, model: str = ""):
-        self._client = AsyncOpenAI(api_key=api_key, base_url=_BASE_URL)
+        self._client = AsyncOpenAI(api_key=api_key, base_url=_BASE_URL, timeout=30.0)
         self._model = model or _DEFAULT_MODEL
 
     @property

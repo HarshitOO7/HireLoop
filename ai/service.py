@@ -568,6 +568,32 @@ class HireLoopAI:
         self._fast = fast_provider
         self._quality = quality_provider
         self._fallback = fallback_provider
+        self.fast_fallback_count = 0
+
+    @property
+    def fallback_provider_name(self) -> str | None:
+        return self._fallback.provider_name if self._fallback else None
+
+    async def _fast_complete_json(
+        self,
+        prompt: str,
+        system: str,
+        schema: "dict | None" = None,
+        max_tokens: int | None = None,
+    ) -> str:
+        try:
+            return await self._fast.complete_json(
+                prompt, system=system, schema=schema, max_tokens=max_tokens
+            )
+        except Exception as exc:
+            if self._fallback:
+                logger.warning("[fast] %s failed (%s) — falling back to %s",
+                               self._fast.provider_name, exc, self._fallback.provider_name)
+                self.fast_fallback_count += 1
+                return await self._fallback.complete_json(
+                    prompt, system=system, schema=schema, max_tokens=max_tokens
+                )
+            raise
 
     async def _quality_complete(
         self, prompt: str, system: str, max_tokens: int | None = None
@@ -611,7 +637,7 @@ class HireLoopAI:
         prompt = _PARSE_JOB_PROMPT.format(jd_text=norm[:3000])
         logger.info("[parse_job] sending to %s — prompt %d chars", self._fast.provider_name, len(prompt))
         t_ai = time.monotonic()
-        raw = await self._fast.complete_json(prompt, system=_PARSE_JOB_SYSTEM, max_tokens=512)
+        raw = await self._fast_complete_json(prompt, system=_PARSE_JOB_SYSTEM, max_tokens=512)
         logger.info("[parse_job] AI responded in %.2fs — raw %d chars", time.monotonic() - t_ai, len(raw))
         result = _parse_json(raw)
         logger.info("[parse_job] DONE %.2fs — title=%r company=%r skills_req=%d",
@@ -634,7 +660,7 @@ class HireLoopAI:
         logger.info("[parse_resume] prompt built — %d chars — sending to AI...", len(prompt))
 
         t_ai = time.monotonic()
-        raw = await self._fast.complete_json(prompt, system=_PARSE_RESUME_SYSTEM, max_tokens=3000)
+        raw = await self._fast_complete_json(prompt, system=_PARSE_RESUME_SYSTEM, max_tokens=3000)
         logger.info("[parse_resume] AI responded in %.2fs — raw response length: %d chars", time.monotonic() - t_ai, len(raw))
 
         result = _parse_json(raw)
@@ -663,7 +689,7 @@ class HireLoopAI:
         )
         logger.info("[analyze_fit] sending to %s — prompt %d chars", self._fast.provider_name, len(prompt))
         t_ai = time.monotonic()
-        raw = await self._fast.complete_json(prompt, system=_FIT_SYSTEM, max_tokens=600)
+        raw = await self._fast_complete_json(prompt, system=_FIT_SYSTEM, max_tokens=600)
         logger.info("[analyze_fit] AI responded in %.2fs — raw %d chars", time.monotonic() - t_ai, len(raw))
         result = _parse_json(raw)
         logger.info("[analyze_fit] DONE %.2fs — fit_score=%s  action=%r  matched=%d  missing_required=%d",
@@ -782,7 +808,7 @@ class HireLoopAI:
             logger.info("[expand_roles] CACHE HIT (%.2fs)", time.monotonic() - t0)
             return cached
         prompt = _EXPAND_ROLES_PROMPT.format(role_titles=role_titles)
-        raw = await self._fast.complete_json(prompt, system=_EXPAND_ROLES_SYSTEM, max_tokens=150)
+        raw = await self._fast_complete_json(prompt, system=_EXPAND_ROLES_SYSTEM, max_tokens=150)
         result = _parse_json(raw)
         if not isinstance(result, list):
             result = [role_titles]
@@ -812,7 +838,7 @@ class HireLoopAI:
         )
         logger.info("[parse_and_fit] sending to %s — prompt %d chars", self._fast.provider_name, len(prompt))
         t_ai = time.monotonic()
-        raw = await self._fast.complete_json(prompt, system=_PARSE_AND_FIT_SYSTEM, max_tokens=1200)
+        raw = await self._fast_complete_json(prompt, system=_PARSE_AND_FIT_SYSTEM, max_tokens=1200)
         logger.info("[parse_and_fit] AI responded in %.2fs — raw %d chars", time.monotonic() - t_ai, len(raw))
         result = _parse_json(raw)
         parsed = result.get("parsed") or {}

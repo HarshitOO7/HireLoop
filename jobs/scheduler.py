@@ -211,6 +211,7 @@ async def _analyze_remaining(
     bg_qualifying: list[Job] = []
     ai_total  = 0
     ai_errors = 0
+    fallback_before = ai.fast_fallback_count
 
     async def _bg_one(raw) -> tuple:
         desc    = raw.get("description") or ""
@@ -253,6 +254,16 @@ async def _analyze_remaining(
                         ai_errors=ScrapeRun.ai_errors + ai_errors,
                     )
                 )
+
+    fallback_used = ai.fast_fallback_count - fallback_before
+    if bot and fallback_used:
+        await bot.send_message(
+            chat_id=user.telegram_id,
+            text=(f"🔁 Fast AI provider failed on {fallback_used} job{'s' if fallback_used != 1 else ''} — "
+                  "switched to fallback automatically. Results are unaffected, but this may signal a "
+                  "real issue with the primary provider — worth checking."),
+            parse_mode="HTML",
+        )
 
     if bot:
         n_more = len(bg_qualifying)
@@ -440,6 +451,7 @@ async def _process_user(user: User, bot, ai, is_manual: bool = False) -> int:
     rest       = list(filtered)
     ai_total   = 0
     ai_errors  = 0
+    fallback_before = ai.fast_fallback_count
 
     while rest and not qualifying:
         batch = rest[:5]
@@ -455,6 +467,18 @@ async def _process_user(user: User, bot, ai, is_manual: bool = False) -> int:
             await _save_job_result(*result, user=user, qualifying=qualifying)
 
     await _record_ai_health(run_id, ai_total, ai_errors)
+
+    fallback_used = ai.fast_fallback_count - fallback_before
+    if fallback_used:
+        await bot.send_message(
+            chat_id=user.telegram_id,
+            text=(f"🔁 Fast AI provider failed on {fallback_used} job{'s' if fallback_used != 1 else ''} — "
+                  "switched to fallback automatically. Results are unaffected, but this may signal a "
+                  "real issue with the primary provider — worth checking."),
+            parse_mode="HTML",
+        )
+        logger.warning("[scheduler] fast provider fell back to %s on %d job(s) for user=%s",
+                        ai.fallback_provider_name or "?", fallback_used, user.telegram_id)
 
     if not qualifying:
         if ai_errors:
