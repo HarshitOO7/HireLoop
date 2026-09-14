@@ -4,7 +4,7 @@ import time
 from openai import AsyncOpenAI
 from ai.base import AIProvider
 
-_DEFAULT_MODEL = "grok-3-fast"
+_DEFAULT_MODEL = "grok-4.20-non-reasoning-latest"
 _BASE_URL = "https://api.x.ai/v1"
 logger = logging.getLogger(__name__)
 

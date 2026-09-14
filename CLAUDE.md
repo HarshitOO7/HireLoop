@@ -20,7 +20,7 @@ HireLoop — a human-in-the-loop autonomous job hunting agent.
 ```env
 AI_FAST_PROVIDER=deepseek
 AI_FAST_API_KEY=your_deepseek_key
-AI_FAST_MODEL=                          # blank = deepseek-chat (DeepSeek V3)
+AI_FAST_MODEL=                          # blank = deepseek-flash
 
 AI_QUALITY_PROVIDER=anthropic
 AI_QUALITY_API_KEY=your_anthropic_key
@@ -28,7 +28,7 @@ AI_QUALITY_MODEL=                       # blank = claude-sonnet-4-6
 
 AI_FALLBACK_PROVIDER=grok
 AI_FALLBACK_API_KEY=your_xai_key
-AI_FALLBACK_MODEL=                      # blank = grok-3-fast
+AI_FALLBACK_MODEL=                      # blank = grok-4.20-non-reasoning-latest
 
 TELEGRAM_BOT_TOKEN=from_botfather
 DATABASE_URL=sqlite:///hireloop.db      # server: sqlite:///data/hireloop.db
