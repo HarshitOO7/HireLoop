@@ -284,7 +284,7 @@ async def returning_user_choice(update: Update, context: ContextTypes.DEFAULT_TY
 
     elif query.data == "returning_addskills":
         await query.edit_message_text(
-            "Tap \u2018\ud83d\udcce Add Resume\u2019 on the keyboard below, or use /addskills to add skills manually."
+            "Tap \u2018\U0001F4CE Add Resume\u2019 on the keyboard below, or use /addskills to add skills manually."
         )
         return ConversationHandler.END
 
