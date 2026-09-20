@@ -1,14 +1,17 @@
 """
 JobSpy wrapper — scrapes Indeed, LinkedIn, and Glassdoor.
 
-Each (term × location × site) triple runs in its own thread executor slot so
-all boards are scraped in parallel instead of sequentially within a single call.
+Each (term × location × site) triple is a scrape task. Tasks run in a thread
+executor with bounded concurrency (BATCH_SIZE in flight at once) instead of
+all at once, so a large title fan-out doesn't spike CPU/memory on the OCI
+free-tier host.
 
 Caps to prevent runaway fan-out:
-  MAX_VARIANTS  = 3  — max role variants used (excess trimmed, first N kept)
+  MAX_VARIANTS  = 20 — max role variants used (excess trimmed, first N kept)
   MAX_LOCATIONS = 2  — max locations used
+  BATCH_SIZE    = half the total tasks in flight at a time (min 1)
 
-So the ceiling is 3 × 2 × 3 = 18 parallel tasks.
+So the ceiling is 20 × 2 × 3 = 120 tasks, run in two batches of ~60.
 
 hours_old is derived from user.notify_freq so we never show stale duplicates:
   twice_daily → 12 h
@@ -28,8 +31,9 @@ logger = logging.getLogger(__name__)
 apply_glassdoor_patch()
 
 _DEFAULT_SITES = ["indeed", "linkedin", "glassdoor"]
-MAX_VARIANTS   = 3
+MAX_VARIANTS   = 20
 MAX_LOCATIONS  = 2
+BATCH_DIVISOR  = 2  # run ~1/BATCH_DIVISOR of total tasks concurrently at a time
 
 
 def _hours_for_freq(notify_freq: str | None) -> int:
@@ -166,15 +170,28 @@ async def scrape_for_user(
             logger.error("[scraper] %s failed term=%r loc=%r: %s", site, term, loc, e)
             return (site, 0, True, None)
 
-    # ── Fan out all (term × location × site) combos in parallel ──────────────
+    # ── Fan out all (term × location × site) combos, batched ─────────────────
+    # Running all tasks at once doesn't scale once MAX_VARIANTS is large — it
+    # can spike CPU/memory on the OCI free-tier host. Instead we run half the
+    # total task list concurrently at a time.
     loop = asyncio.get_event_loop()
-    tasks = [
-        loop.run_in_executor(None, _scrape_one, term, loc, site)
+    combos = [
+        (term, loc, site)
         for term in search_terms
         for loc in search_locations
         for site in sites
     ]
-    results = await asyncio.gather(*tasks)
+    batch_size = max(1, -(-len(combos) // BATCH_DIVISOR))  # ceil division
+    logger.info("[scraper] running %d tasks in batches of %d", len(combos), batch_size)
+
+    results = []
+    for i in range(0, len(combos), batch_size):
+        batch = combos[i:i + batch_size]
+        batch_tasks = [
+            loop.run_in_executor(None, _scrape_one, term, loc, site)
+            for term, loc, site in batch
+        ]
+        results.extend(await asyncio.gather(*batch_tasks))
 
     # Aggregate per-site results/errors for health tracking, and collect the dfs.
     per_site: dict[str, dict[str, int]] = {s: {"results": 0, "errors": 0} for s in sites}

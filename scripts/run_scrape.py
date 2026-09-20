@@ -46,12 +46,14 @@ async def main():
     from jobs.filters import apply_filters, url_hash
     from sqlalchemy import select, func
 
-    fast    = AIFactory.create_fast()
-    quality = AIFactory.create_quality()
-    ai      = HireLoopAI(fast_provider=fast, quality_provider=quality)
+    fast     = AIFactory.create_fast()
+    quality  = AIFactory.create_quality()
+    fallback = AIFactory.create_fallback()
+    ai       = HireLoopAI(fast_provider=fast, quality_provider=quality, fallback_provider=fallback)
 
-    logger.info("Fast    : %s", fast.provider_name)
-    logger.info("Quality : %s", quality.provider_name)
+    logger.info("Fast     : %s", fast.provider_name)
+    logger.info("Quality  : %s", quality.provider_name)
+    logger.info("Fallback : %s", fallback.provider_name)
 
     async with AsyncSessionLocal() as s:
         result = await s.execute(select(User).where(User.onboarded == True))

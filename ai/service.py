@@ -352,16 +352,20 @@ _EXPAND_ROLES_SYSTEM = """You are a job search expert. Return ONLY a valid JSON 
 _EXPAND_ROLES_PROMPT = """The user is targeting these job titles:
 {role_titles}
 
-Return exactly 3 job search terms for use as job board keywords. Rules:
+Return up to 20 job search terms for use as job board keywords, covering a wide
+variety of adjacent and related titles so the search surfaces a broad range of
+listings. Rules:
 - Each term must cover DIFFERENT search space — no synonyms, no near-duplicates
 - If the input already contains a broad term (e.g. "Software Engineer"), do NOT add narrower variants of it (e.g. "Backend Engineer") — they are already covered
 - Prefer broader/more general titles over specific ones so one search catches more listings
+- Include reasonable adjacent/related titles a candidate with this background would also qualify for
 - Keep each title SHORT (2–4 words max)
 - No seniority prefixes (no Senior/Junior/Lead) — those are covered by the user's years filter
 - No descriptions, no explanations
+- Fewer than 20 is fine if you run out of genuinely distinct titles — never pad with near-duplicates
 
-Return a JSON array of exactly 3 strings:
-["Title 1", "Title 2", "Title 3"]"""
+Return a JSON array of up to 20 strings:
+["Title 1", "Title 2", ..., "Title 20"]"""
 
 _PARSE_AND_FIT_SYSTEM = """You are a job parser and fit analyzer. Be conservative and honest. Never inflate scores.
 
@@ -801,14 +805,14 @@ class HireLoopAI:
         return result
 
     async def expand_role_titles(self, role_titles: str) -> list[str]:
-        """Expand comma-separated role titles into 3 job-board-friendly search variants."""
+        """Expand comma-separated role titles into up to 20 job-board-friendly search variants."""
         logger.info("[expand_roles] START — input=%r", role_titles[:80])
         t0 = time.monotonic()
         if cached := cache.get("expand_roles", role_titles):
             logger.info("[expand_roles] CACHE HIT (%.2fs)", time.monotonic() - t0)
             return cached
         prompt = _EXPAND_ROLES_PROMPT.format(role_titles=role_titles)
-        raw = await self._fast_complete_json(prompt, system=_EXPAND_ROLES_SYSTEM, max_tokens=150)
+        raw = await self._fast_complete_json(prompt, system=_EXPAND_ROLES_SYSTEM, max_tokens=600)
         result = _parse_json(raw)
         if not isinstance(result, list):
             result = [role_titles]
