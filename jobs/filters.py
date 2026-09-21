@@ -50,6 +50,13 @@ _JUNIOR_TITLE_WORDS = {
 _ROLE_STOP_WORDS = {
     "and", "or", "the", "of", "in", "at", "for", "to", "a", "an",
     "by", "on", "as", "with", "from", "is", "it", "its", "be",
+    # Generic job-title nouns — appear across unrelated functions (engineering,
+    # sales, marketing, ops all have "managers" and "specialists"), so on their
+    # own they're not a meaningful relevance signal and let off-topic titles
+    # slip through (e.g. "Growth Marketing Manager" matching on "manager").
+    "manager", "specialist", "engineer", "developer", "analyst",
+    "consultant", "coordinator", "associate", "representative",
+    "director", "lead", "administrator", "officer", "executive",
 }
 
 # Regex that finds year-requirement phrases in job descriptions.

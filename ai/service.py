@@ -355,14 +355,20 @@ _EXPAND_ROLES_PROMPT = """The user is targeting these job titles:
 Return up to 20 job search terms for use as job board keywords, covering a wide
 variety of adjacent and related titles so the search surfaces a broad range of
 listings. Rules:
+- STAY IN THE SAME FUNCTION as the input titles. If every input title is an
+  engineering/technical role, every output title must also be hands-on
+  engineering/technical — never drift into product, project, program, sales,
+  marketing, growth, merchandising, business-analyst, or other non-technical
+  adjacent functions just because a company or domain word (e.g. "E-commerce")
+  overlaps. A candidate targeting "E-commerce developer" wants other engineering
+  titles (e.g. "Backend Developer", "Platform Engineer"), not "E-commerce Manager".
 - Each term must cover DIFFERENT search space — no synonyms, no near-duplicates
 - If the input already contains a broad term (e.g. "Software Engineer"), do NOT add narrower variants of it (e.g. "Backend Engineer") — they are already covered
 - Prefer broader/more general titles over specific ones so one search catches more listings
-- Include reasonable adjacent/related titles a candidate with this background would also qualify for
 - Keep each title SHORT (2–4 words max)
 - No seniority prefixes (no Senior/Junior/Lead) — those are covered by the user's years filter
 - No descriptions, no explanations
-- Fewer than 20 is fine if you run out of genuinely distinct titles — never pad with near-duplicates
+- Fewer than 20 is fine if you run out of genuinely distinct titles in the same function — never pad with near-duplicates or out-of-function titles just to hit 20
 
 Return a JSON array of up to 20 strings:
 ["Title 1", "Title 2", ..., "Title 20"]"""
