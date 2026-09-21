@@ -1,21 +1,20 @@
 """
 JobSpy wrapper — scrapes Indeed, LinkedIn, and Glassdoor.
 
-Each (term × location × site) triple is a scrape task. Tasks run in a thread
-executor with bounded concurrency (BATCH_SIZE in flight at once) instead of
-all at once, so a large title fan-out doesn't spike CPU/memory on the OCI
-free-tier host.
+Each (term × location × site) triple is a scrape task, run in a thread
+executor. Concurrency is capped PER SITE (not globally) so a large title
+fan-out doesn't fire a burst of near-simultaneous requests at any one board —
+that burst pattern is what gets an IP flagged as a bot. Indeed in particular
+blocks aggressively on concurrent-request bursts, so it gets the lowest cap
+plus a small stagger delay between launches; LinkedIn tolerates more.
 
 Caps to prevent runaway fan-out:
   MAX_VARIANTS  = 20 — max role variants used (excess trimmed, first N kept)
   MAX_LOCATIONS = 2  — max locations used
-  BATCH_SIZE    = half the total tasks in flight at a time (min 1)
+  SITE_CONCURRENCY — max in-flight requests, per site (see dict below)
+  SITE_STAGGER_S   — delay between launching requests, per site
 
-So the ceiling is 20 × 2 × 3 = 120 tasks, run in two batches of ~60.
-
-hours_old is derived from user.notify_freq so we never show stale duplicates:
-  twice_daily → 12 h
-  daily       → 24 h  (default)
+So the ceiling is 20 × 2 = 40 tasks per site, throttled per SITE_CONCURRENCY.
 """
 
 import asyncio
@@ -33,7 +32,16 @@ apply_glassdoor_patch()
 _DEFAULT_SITES = ["indeed", "linkedin", "glassdoor"]
 MAX_VARIANTS   = 20
 MAX_LOCATIONS  = 2
-BATCH_DIVISOR  = 2  # run ~1/BATCH_DIVISOR of total tasks concurrently at a time
+
+# Indeed blocks hard on concurrent-request bursts from one IP (confirmed: went
+# from healthy to 0-results-silently-every-scrape the run right after variant
+# fan-out rose from 3 to 20, i.e. concurrent Indeed requests per scrape rose
+# from ~9 to ~20+). Keep it low and paced. LinkedIn has shown no such
+# sensitivity even at full 20-variant fan-out, so it keeps more headroom.
+SITE_CONCURRENCY: dict[str, int] = {"indeed": 2, "linkedin": 8, "glassdoor": 3}
+SITE_STAGGER_S:   dict[str, float] = {"indeed": 1.5, "linkedin": 0.0, "glassdoor": 0.5}
+_DEFAULT_CONCURRENCY = 4
+_DEFAULT_STAGGER_S   = 0.5
 
 
 def _hours_for_freq(notify_freq: str | None) -> int:
@@ -170,10 +178,13 @@ async def scrape_for_user(
             logger.error("[scraper] %s failed term=%r loc=%r: %s", site, term, loc, e)
             return (site, 0, True, None)
 
-    # ── Fan out all (term × location × site) combos, batched ─────────────────
-    # Running all tasks at once doesn't scale once MAX_VARIANTS is large — it
-    # can spike CPU/memory on the OCI free-tier host. Instead we run half the
-    # total task list concurrently at a time.
+    # ── Fan out all (term × location × site) combos, throttled PER SITE ──────
+    # A shared/global concurrency cap still lets many requests to the SAME site
+    # land at once whenever combos for that site cluster together in the
+    # batch — that concurrent-burst pattern is what got Indeed to start
+    # silently blocking this IP. Each site instead gets its own semaphore
+    # (and Indeed additionally gets a launch stagger) so no single board ever
+    # sees more than its configured number of requests in flight together.
     loop = asyncio.get_event_loop()
     combos = [
         (term, loc, site)
@@ -181,17 +192,21 @@ async def scrape_for_user(
         for loc in search_locations
         for site in sites
     ]
-    batch_size = max(1, -(-len(combos) // BATCH_DIVISOR))  # ceil division
-    logger.info("[scraper] running %d tasks in batches of %d", len(combos), batch_size)
+    semaphores = {
+        site: asyncio.Semaphore(SITE_CONCURRENCY.get(site, _DEFAULT_CONCURRENCY))
+        for site in sites
+    }
+    logger.info("[scraper] running %d tasks — per-site concurrency: %s",
+                len(combos), {s: SITE_CONCURRENCY.get(s, _DEFAULT_CONCURRENCY) for s in sites})
 
-    results = []
-    for i in range(0, len(combos), batch_size):
-        batch = combos[i:i + batch_size]
-        batch_tasks = [
-            loop.run_in_executor(None, _scrape_one, term, loc, site)
-            for term, loc, site in batch
-        ]
-        results.extend(await asyncio.gather(*batch_tasks))
+    async def _run_one(term: str, loc: str, site: str):
+        async with semaphores[site]:
+            stagger = SITE_STAGGER_S.get(site, _DEFAULT_STAGGER_S)
+            if stagger:
+                await asyncio.sleep(stagger)
+            return await loop.run_in_executor(None, _scrape_one, term, loc, site)
+
+    results = await asyncio.gather(*[_run_one(term, loc, site) for term, loc, site in combos])
 
     # Aggregate per-site results/errors for health tracking, and collect the dfs.
     per_site: dict[str, dict[str, int]] = {s: {"results": 0, "errors": 0} for s in sites}
